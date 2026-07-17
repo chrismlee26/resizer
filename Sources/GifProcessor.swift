@@ -8,6 +8,7 @@ struct GifSettings {
     var fps: Int            // frames per second
     var colors: Int         // palette size, 2...256
     var targetBytes: Int?   // optional max file size; shrinks width to hit it
+    var lossy: Int? = nil   // gifsicle --lossy level (nil = skip gifsicle pass)
 }
 
 struct GifResult {
@@ -45,10 +46,24 @@ enum GifProcessor {
         var attempts = 0
         let maxAttempts = settings.targetBytes == nil ? 1 : 5
 
+        // Resolve gifsicle up front so a missing tool fails before the
+        // (slow) ffmpeg encode, not after it.
+        let gifsicle: String? = try settings.lossy.map { _ in
+            guard let path = ToolRunner.find("gifsicle") else {
+                throw ToolError.toolNotFound("gifsicle")
+            }
+            return path
+        }
+
         while true {
             attempts += 1
             try encode(ffmpeg: ffmpeg, input: url, output: output,
                        width: width, fps: settings.fps, colors: settings.colors)
+            if let gifsicle, let lossy = settings.lossy {
+                // -b rewrites in place; -O3 adds frame-diff + transparency
+                // optimization on top of the lossy LZW recompression.
+                try ToolRunner.run(gifsicle, ["-b", "-O3", "--lossy=\(lossy)", output.path])
+            }
             let bytes = fileSize(output)
 
             guard let target = settings.targetBytes, bytes > target else {
@@ -97,8 +112,11 @@ enum GifProcessor {
         let frames = max(Double(settings.fps) * duration, 1)
         let bitsPerPixel = log2(Double(max(settings.colors, 2)))
         let lzwCompression = 0.5
+        // Typical measured reductions from the gifsicle pass: the UI's
+        // "Balanced" (80) lands near -35%, "Strong" (140) near -50%.
+        let lossyFactor = settings.lossy.map { $0 >= 140 ? 0.5 : ($0 >= 80 ? 0.65 : 0.85) } ?? 1.0
         return Int(frames * Double(settings.width) * height
-                   * bitsPerPixel / 8 * lzwCompression)
+                   * bitsPerPixel / 8 * lzwCompression * lossyFactor)
     }
 
     private static func fileSize(_ url: URL) -> Int {

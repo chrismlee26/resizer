@@ -50,5 +50,60 @@ expect(squeezed.attempts > 1, "target size triggered a retry (\(squeezed.attempt
 expect(squeezed.bytes <= target || squeezed.width == 40,
        "squeezed gif \(squeezed.bytes)B vs target \(target)B (width \(squeezed.width))")
 
+// GIF: gifsicle lossy pass shrinks output (skipped when not installed)
+if ToolRunner.find("gifsicle") != nil {
+    let lossy = try GifProcessor.convert(
+        mov, settings: GifSettings(width: 320, fps: 15, colors: 256,
+                                   targetBytes: nil, lossy: 140))
+    expect(lossy.bytes > 0, "lossy gif is non-empty (\(lossy.bytes) bytes)")
+    expect(lossy.bytes < big.bytes,
+           "lossy=140 beats uncompressed (\(lossy.bytes)B < \(big.bytes)B)")
+    let lossySize = try ImageProcessor.pixelSize(of: lossy.output)
+    expect(lossySize.width == 320, "lossy gif keeps width 320, got \(lossySize.width)")
+} else {
+    print("skip: gifsicle not installed, lossy tests skipped")
+}
+
+// GIF: lossy estimate scales down
+let plainEstimate = GifProcessor.estimatedBytes(
+    settings: GifSettings(width: 320, fps: 15, colors: 128, targetBytes: nil),
+    source: PixelSize(width: 320, height: 240), duration: 2)
+let lossyEstimate = GifProcessor.estimatedBytes(
+    settings: GifSettings(width: 320, fps: 15, colors: 128, targetBytes: nil, lossy: 140),
+    source: PixelSize(width: 320, height: 240), duration: 2)
+expect(lossyEstimate == plainEstimate / 2,
+       "strong lossy halves estimate (\(plainEstimate) → \(lossyEstimate))")
+
+// GIF: size estimator sanity
+let base = GifSettings(width: 320, fps: 15, colors: 128, targetBytes: nil)
+let source = PixelSize(width: 320, height: 240)
+let estimate = GifProcessor.estimatedBytes(settings: base, source: source, duration: 2)
+expect(estimate > 0, "estimate is positive (\(estimate) bytes)")
+
+let doubleFps = GifProcessor.estimatedBytes(
+    settings: GifSettings(width: 320, fps: 30, colors: 128, targetBytes: nil),
+    source: source, duration: 2)
+expect(doubleFps == estimate * 2, "double fps doubles estimate (\(estimate) → \(doubleFps))")
+
+let fewerColors = GifProcessor.estimatedBytes(
+    settings: GifSettings(width: 320, fps: 15, colors: 16, targetBytes: nil),
+    source: source, duration: 2)
+expect(fewerColors < estimate, "fewer colors shrinks estimate (\(estimate) → \(fewerColors))")
+
+let halfWidth = GifProcessor.estimatedBytes(
+    settings: GifSettings(width: 160, fps: 15, colors: 128, targetBytes: nil),
+    source: source, duration: 2)
+expect(abs(halfWidth * 4 - estimate) <= 4,
+       "half width quarters estimate (\(estimate) → \(halfWidth))")
+
+// Synthetic testsrc frames are a best case for LZW, so the real file lands
+// well under the estimate — just require the estimate to be an upper bound
+// of the right order of magnitude.
+let estimated = GifProcessor.estimatedBytes(
+    settings: GifSettings(width: 320, fps: 15, colors: 256, targetBytes: nil),
+    source: PixelSize(width: 320, height: 240), duration: 2)
+expect(big.bytes <= estimated && estimated < big.bytes * 100,
+       "estimate \(estimated)B brackets actual \(big.bytes)B")
+
 if failures > 0 { print("\(failures) integration test(s) failed"); exit(1) }
 print("All integration tests passed")

@@ -36,10 +36,23 @@ final class OptionsWindowController: NSWindowController {
     private static let gifFpsOptions = [30, 24, 20, 15, 12, 10, 8, 5]
     private static let gifFpsRecommended = 15
 
+    /// Compression presets map to gifsicle --lossy levels; nil skips the
+    /// gifsicle pass entirely so it stays usable without the tool installed.
+    private static let gifCompressionOptions: [(title: String, lossy: Int?)] = [
+        ("None", nil), ("Balanced", 80), ("Strong", 140),
+    ]
+
     private let gifWidthField = NSTextField(string: "640")
     private let gifFpsPopup = NSPopUpButton()
     private let gifColorsPopup = NSPopUpButton()
+    private let gifCompressionPopup = NSPopUpButton()
     private let gifTargetField = NSTextField(string: "")
+    private let gifOriginalLabel = NSTextField(labelWithString: "Original: …")
+    private let gifEstimateLabel = NSTextField(labelWithString: "")
+
+    /// Metadata of the first dropped video; drives the original-size line
+    /// and the live GIF size estimate. Loaded async after the window opens.
+    private var videoInfo: VideoInfo?
 
     private let outputModePopup = NSPopUpButton()
     private let convertButton = NSButton(title: "Convert", target: nil, action: nil)
@@ -245,20 +258,101 @@ final class OptionsWindowController: NSWindowController {
         gifFpsPopup.selectItem(
             at: Self.gifFpsOptions.firstIndex(of: Self.gifFpsRecommended) ?? 0)
 
+        gifCompressionPopup.addItems(withTitles: Self.gifCompressionOptions.map {
+            $0.lossy == 80 ? "\($0.title) (Recommended)" : $0.title
+        })
+        // Default to Balanced when gifsicle is around; otherwise None so a
+        // fresh install converts without an error out of the box.
+        let hasGifsicle = ToolRunner.find("gifsicle") != nil
+        gifCompressionPopup.selectItem(at: hasGifsicle ? 1 : 0)
+        if !hasGifsicle {
+            gifCompressionPopup.toolTip =
+                "Balanced/Strong need gifsicle — install with: brew install gifsicle"
+        }
+
+        gifFpsPopup.target = self
+        gifFpsPopup.action = #selector(gifSettingChanged)
+        gifColorsPopup.target = self
+        gifColorsPopup.action = #selector(gifSettingChanged)
+        gifCompressionPopup.target = self
+        gifCompressionPopup.action = #selector(gifSettingChanged)
+        gifWidthField.delegate = self
+        gifTargetField.delegate = self
+
         for field in [gifWidthField, gifTargetField] {
             field.widthAnchor.constraint(equalToConstant: 56).isActive = true
         }
         gifTargetField.placeholderString = "—"
 
+        gifOriginalLabel.textColor = .secondaryLabelColor
+        gifOriginalLabel.font = .systemFont(ofSize: 12)
+        gifEstimateLabel.textColor = .secondaryLabelColor
+        gifEstimateLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+
         let row = NSStackView(views: [
             makeLabel("Width"), gifWidthField,
             makeLabel("FPS"), gifFpsPopup,
             makeLabel("Colors"), gifColorsPopup,
+            makeLabel("Compression"), gifCompressionPopup,
             makeLabel("Max MB"), gifTargetField,
         ])
         row.orientation = .horizontal
         row.spacing = 6
-        return section("Video → GIF", content: row)
+
+        let rows = NSStackView(views: [gifOriginalLabel, row, gifEstimateLabel])
+        rows.orientation = .vertical
+        rows.alignment = .leading
+        rows.spacing = 8
+
+        loadVideoInfo()
+        return section("Video → GIF", content: rows)
+    }
+
+    /// Read the first video's metadata off the main thread, then show the
+    /// original-size line and the initial GIF estimate.
+    private func loadVideoInfo() {
+        guard let first = videos.first else { return }
+        Task { [weak self] in
+            do {
+                let info = try await VideoProbe.info(for: first)
+                await MainActor.run { self?.videoInfoLoaded(info) }
+            } catch {
+                await MainActor.run {
+                    self?.gifOriginalLabel.stringValue =
+                        "Original: unavailable (\(error.localizedDescription))"
+                }
+            }
+        }
+    }
+
+    private func videoInfoLoaded(_ info: VideoInfo) {
+        videoInfo = info
+        var text = "Original: \(GifProcessor.format(bytes: info.fileBytes))"
+            + " · \(info.pixelSize.width) × \(info.pixelSize.height) px"
+            + " · " + String(format: "%.1f s", info.duration)
+        if videos.count > 1 { text += "  (first of \(videos.count) videos)" }
+        gifOriginalLabel.stringValue = text
+        updateGifEstimate()
+        refreshWindowSize()
+    }
+
+    /// Live "Estimated GIF: ~X MB" readout, recomputed on every settings
+    /// change. Multi-video drops estimate the first video only.
+    private func updateGifEstimate() {
+        guard let info = videoInfo else { return }
+        let settings = currentGifSettings()
+        let bytes = GifProcessor.estimatedBytes(settings: settings,
+                                                source: info.pixelSize,
+                                                duration: info.duration)
+        var text = "Estimated GIF: ~\(GifProcessor.format(bytes: bytes))"
+        if let target = settings.targetBytes, bytes > target {
+            text += "  (over max — width will shrink to fit)"
+        }
+        gifEstimateLabel.stringValue = text
+    }
+
+    @objc private func gifSettingChanged() {
+        updateGifEstimate()
     }
 
     /// A section header above its content row. (NSBox draws its title over
@@ -317,11 +411,15 @@ final class OptionsWindowController: NSWindowController {
         let fpsIndex = gifFpsPopup.indexOfSelectedItem
         let fps = Self.gifFpsOptions.indices.contains(fpsIndex)
             ? Self.gifFpsOptions[fpsIndex] : Self.gifFpsRecommended
+        let compressionIndex = gifCompressionPopup.indexOfSelectedItem
+        let lossy = Self.gifCompressionOptions.indices.contains(compressionIndex)
+            ? Self.gifCompressionOptions[compressionIndex].lossy : nil
         return GifSettings(
             width: max(Int(gifWidthField.stringValue) ?? 640, 40),
             fps: fps,
             colors: Int(gifColorsPopup.titleOfSelectedItem ?? "128") ?? 128,
-            targetBytes: mb.map { Int($0 * 1_000_000) }
+            targetBytes: mb.map { Int($0 * 1_000_000) },
+            lossy: lossy
         )
     }
 
@@ -471,6 +569,10 @@ extension OptionsWindowController: NSTextFieldDelegate {
               let field = notification.object as? NSTextField else { return }
         if field === percentField {
             updatePercentResult()
+            return
+        }
+        if field === gifWidthField || field === gifTargetField {
+            updateGifEstimate()
             return
         }
         guard imageModePopup.indexOfSelectedItem == 2,
