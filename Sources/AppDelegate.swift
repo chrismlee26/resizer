@@ -57,7 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func buildMenu() {
         menu.delegate = self
-        let openItem = NSMenuItem(title: "Open Files…", action: #selector(openFiles),
+        let openItem = NSMenuItem(title: "Load File…", action: #selector(openFiles),
                                   keyEquivalent: "o")
         openItem.target = self
         menu.addItem(openItem)
