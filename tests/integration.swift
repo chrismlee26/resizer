@@ -74,6 +74,34 @@ let lossyEstimate = GifProcessor.estimatedBytes(
 expect(lossyEstimate == plainEstimate / 2,
        "strong lossy halves estimate (\(plainEstimate) → \(lossyEstimate))")
 
+// WebP: basic conversion
+let webp = try GifProcessor.convert(
+    mov, settings: GifSettings(width: 200, fps: 10, colors: 128,
+                               targetBytes: nil, format: .webp))
+expect(webp.output.pathExtension == "webp", "webp output has .webp extension")
+expect(FileManager.default.fileExists(atPath: webp.output.path), "webp output exists")
+expect(webp.bytes > 0, "webp is non-empty (\(webp.bytes) bytes)")
+let webpSize = try ImageProcessor.pixelSize(of: webp.output)
+expect(webpSize.width == 200, "webp width is 200, got \(webpSize.width)")
+
+// WebP: smaller than the equivalent GIF
+let webpBig = try GifProcessor.convert(
+    mov, settings: GifSettings(width: 320, fps: 15, colors: 256,
+                               targetBytes: nil, format: .webp))
+expect(webpBig.bytes < big.bytes,
+       "webp beats gif at same settings (\(webpBig.bytes)B < \(big.bytes)B)")
+
+// WebP: estimator is format-aware and far below the GIF estimate
+let webpEstimate = GifProcessor.estimatedBytes(
+    settings: GifSettings(width: 320, fps: 15, colors: 256,
+                          targetBytes: nil, format: .webp),
+    source: PixelSize(width: 320, height: 240), duration: 2)
+let gifEstimate = GifProcessor.estimatedBytes(
+    settings: GifSettings(width: 320, fps: 15, colors: 256, targetBytes: nil),
+    source: PixelSize(width: 320, height: 240), duration: 2)
+expect(webpEstimate > 0 && webpEstimate < gifEstimate / 2,
+       "webp estimate well under gif (\(webpEstimate) vs \(gifEstimate))")
+
 // GIF: size estimator sanity
 let base = GifSettings(width: 320, fps: 15, colors: 128, targetBytes: nil)
 let source = PixelSize(width: 320, height: 240)

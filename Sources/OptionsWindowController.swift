@@ -42,9 +42,11 @@ final class OptionsWindowController: NSWindowController {
         ("None", nil), ("Balanced", 80), ("Strong", 140),
     ]
 
+    private let gifFormatPopup = NSPopUpButton()
     private let gifWidthField = NSTextField(string: "640")
     private let gifFpsPopup = NSPopUpButton()
     private let gifColorsPopup = NSPopUpButton()
+    private let gifColorsLabel = NSTextField(labelWithString: "Colors")
     private let gifCompressionPopup = NSPopUpButton()
     private let gifTargetField = NSTextField(string: "")
     private let gifOriginalLabel = NSTextField(labelWithString: "Original: …")
@@ -270,6 +272,10 @@ final class OptionsWindowController: NSWindowController {
                 "Balanced/Strong need gifsicle — install with: brew install gifsicle"
         }
 
+        gifFormatPopup.addItems(withTitles: ["GIF", "WebP"])
+        gifFormatPopup.target = self
+        gifFormatPopup.action = #selector(gifFormatChanged)
+
         gifFpsPopup.target = self
         gifFpsPopup.action = #selector(gifSettingChanged)
         gifColorsPopup.target = self
@@ -290,9 +296,10 @@ final class OptionsWindowController: NSWindowController {
         gifEstimateLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
 
         let row = NSStackView(views: [
+            makeLabel("Format"), gifFormatPopup,
             makeLabel("Width"), gifWidthField,
             makeLabel("FPS"), gifFpsPopup,
-            makeLabel("Colors"), gifColorsPopup,
+            gifColorsLabel, gifColorsPopup,
             makeLabel("Compression"), gifCompressionPopup,
             makeLabel("Max MB"), gifTargetField,
         ])
@@ -305,7 +312,20 @@ final class OptionsWindowController: NSWindowController {
         rows.spacing = 8
 
         loadVideoInfo()
-        return section("Video → GIF", content: rows)
+        return section("Video → GIF / WebP", content: rows)
+    }
+
+    /// WebP has no palette, so the Colors control only applies to GIF.
+    @objc private func gifFormatChanged() {
+        let isWebp = currentVideoFormat() == .webp
+        gifColorsLabel.isHidden = isWebp
+        gifColorsPopup.isHidden = isWebp
+        updateGifEstimate()
+        refreshWindowSize()
+    }
+
+    private func currentVideoFormat() -> VideoOutputFormat {
+        gifFormatPopup.indexOfSelectedItem == 1 ? .webp : .gif
     }
 
     /// Read the first video's metadata off the main thread, then show the
@@ -344,7 +364,7 @@ final class OptionsWindowController: NSWindowController {
         let bytes = GifProcessor.estimatedBytes(settings: settings,
                                                 source: info.pixelSize,
                                                 duration: info.duration)
-        var text = "Estimated GIF: ~\(GifProcessor.format(bytes: bytes))"
+        var text = "Estimated \(settings.format.displayName): ~\(GifProcessor.format(bytes: bytes))"
         if let target = settings.targetBytes, bytes > target {
             text += "  (over max — width will shrink to fit)"
         }
@@ -419,7 +439,8 @@ final class OptionsWindowController: NSWindowController {
             fps: fps,
             colors: Int(gifColorsPopup.titleOfSelectedItem ?? "128") ?? 128,
             targetBytes: mb.map { Int($0 * 1_000_000) },
-            lossy: lossy
+            lossy: lossy,
+            format: currentVideoFormat()
         )
     }
 
@@ -429,14 +450,15 @@ final class OptionsWindowController: NSWindowController {
     /// random-token name themselves.
     private func askForOutputURL(source: URL) -> URL? {
         let isVideo = FileClassifier.kind(of: source) == .video
-        let ext = isVideo ? "gif"
+        let format = currentVideoFormat()
+        let ext = isVideo ? format.fileExtension
             : (source.pathExtension.isEmpty ? "png" : source.pathExtension)
         let base = source.deletingPathExtension().lastPathComponent
 
         let panel = NSSavePanel()
         panel.directoryURL = source.deletingLastPathComponent()
         panel.nameFieldStringValue = "\(base)-\(Geometry.randomToken()).\(ext)"
-        panel.title = isVideo ? "Save GIF" : "Save Resized Image"
+        panel.title = isVideo ? "Save \(format.displayName)" : "Save Resized Image"
         panel.message = "Choose a name for \(source.lastPathComponent)"
         if let type = UTType(filenameExtension: ext) {
             panel.allowedContentTypes = [type]
