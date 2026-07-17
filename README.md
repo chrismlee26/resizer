@@ -1,7 +1,8 @@
 # Resizer
 
 A tiny macOS menu bar droplet for resizing photos and converting videos to
-GIFs, built on `sips` (built into macOS) and `ffmpeg` (Homebrew).
+GIF or animated WebP, built on `sips` (built into macOS), `ffmpeg`
+(Homebrew), and optionally `gifsicle` (Homebrew) for lossy GIF compression.
 
 ## Usage
 
@@ -17,9 +18,21 @@ appears:
   `name-<width>w-<random>.ext`; originals and existing files are never
   replaced. Switch **Output** to "Ask for name…" to pick each output name in
   a save panel instead.
-- **Videos → GIF** — set width, FPS, and palette colors (fewer colors =
-  smaller file). Optionally set **Max MB**: Resizer re-encodes at smaller
-  widths until the GIF fits under that size — handy for Slack/email limits.
+- **Videos → GIF / WebP** — pick an output **Format** (GIF or animated
+  WebP), width, FPS (preset dropdown, 15 recommended), and for GIF the
+  palette colors (fewer colors = smaller file). The panel shows the
+  original video's file size, resolution, and duration, plus a live
+  **estimated output size** that updates as you change settings (rough —
+  expect real results within ~2× either way). WebP is typically several
+  times smaller than GIF at the same resolution; use GIF only where the
+  consumer requires it (e.g. GitHub READMEs).
+  - **Compression** — None / Balanced (recommended) / Strong. For GIF this
+    runs a `gifsicle -O3 --lossy` pass (30/80); Strong saves ~35% but can
+    ghost on fast motion. For WebP it maps to quality q90/q75/q50. GIF
+    compression needs `gifsicle` (`brew install gifsicle`) — without it,
+    the dropdown defaults to None and conversion still works.
+  - **Max MB** — Resizer re-encodes at smaller widths until the output
+    fits under that size — handy for Slack/email limits.
 
 You can also drop files onto the app icon in Finder, use "Open With →
 Resizer", or pick **Open Files…** from the menu bar menu.
@@ -32,7 +45,8 @@ Resizer", or pick **Open Files…** from the menu bar menu.
 ```
 
 Requires Xcode command line tools (`swiftc`) and `ffmpeg`
-(`brew install ffmpeg`). Image resizing works without ffmpeg.
+(`brew install ffmpeg`). Image resizing works without ffmpeg. Lossy GIF
+compression additionally uses `gifsicle` (`brew install gifsicle`).
 
 To launch at login: System Settings → General → Login Items → add Resizer.
 
@@ -48,8 +62,11 @@ tests/run_tests.sh    # unit tests (sizing math) + integration (real sips/ffmpeg
   GIF shrink-to-target stepping, collision-free output naming)
 - `Sources/ToolRunner.swift` — Process wrapper + Homebrew-aware binary lookup
 - `Sources/ImageProcessor.swift` — sips pipeline (copy, then resample the copy)
-- `Sources/GifProcessor.swift` — ffmpeg two-pass palette GIF encode with
-  optional target-size retry loop
+- `Sources/GifProcessor.swift` — ffmpeg two-pass palette GIF encode
+  (inter-frame optimized) with optional gifsicle lossy pass, animated WebP
+  encode, output size estimator, and target-size retry loop
+- `Sources/VideoProbe.swift` — AVFoundation metadata loader (resolution,
+  duration, file size) behind the panel's original/estimate labels
 - `Sources/DropView.swift` / `AppDelegate.swift` — status item + drag & drop
 - `Sources/OptionsWindowController.swift` — the options panel
 - `Resources/AppIcon.png` — app icon source; build.sh scales it into the .icns
