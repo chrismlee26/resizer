@@ -30,8 +30,14 @@ final class OptionsWindowController: NSWindowController {
     private var isProgrammaticFieldUpdate = false
 
     // GIF controls
+    /// FPS presets for video → GIF, highest first. 15 balances smoothness
+    /// against file size for most clips; 5 is the floor — anything lower
+    /// reads as a slideshow rather than motion.
+    private static let gifFpsOptions = [30, 24, 20, 15, 12, 10, 8, 5]
+    private static let gifFpsRecommended = 15
+
     private let gifWidthField = NSTextField(string: "640")
-    private let gifFpsField = NSTextField(string: "12")
+    private let gifFpsPopup = NSPopUpButton()
     private let gifColorsPopup = NSPopUpButton()
     private let gifTargetField = NSTextField(string: "")
 
@@ -233,14 +239,20 @@ final class OptionsWindowController: NSWindowController {
         gifColorsPopup.addItems(withTitles: ["256", "128", "64", "32", "16"])
         gifColorsPopup.selectItem(at: 1)
 
-        for field in [gifWidthField, gifFpsField, gifTargetField] {
+        gifFpsPopup.addItems(withTitles: Self.gifFpsOptions.map {
+            $0 == Self.gifFpsRecommended ? "\($0) (Recommended)" : "\($0)"
+        })
+        gifFpsPopup.selectItem(
+            at: Self.gifFpsOptions.firstIndex(of: Self.gifFpsRecommended) ?? 0)
+
+        for field in [gifWidthField, gifTargetField] {
             field.widthAnchor.constraint(equalToConstant: 56).isActive = true
         }
         gifTargetField.placeholderString = "—"
 
         let row = NSStackView(views: [
             makeLabel("Width"), gifWidthField,
-            makeLabel("FPS"), gifFpsField,
+            makeLabel("FPS"), gifFpsPopup,
             makeLabel("Colors"), gifColorsPopup,
             makeLabel("Max MB"), gifTargetField,
         ])
@@ -302,9 +314,12 @@ final class OptionsWindowController: NSWindowController {
 
     private func currentGifSettings() -> GifSettings {
         let mb = Double(gifTargetField.stringValue)
+        let fpsIndex = gifFpsPopup.indexOfSelectedItem
+        let fps = Self.gifFpsOptions.indices.contains(fpsIndex)
+            ? Self.gifFpsOptions[fpsIndex] : Self.gifFpsRecommended
         return GifSettings(
             width: max(Int(gifWidthField.stringValue) ?? 640, 40),
-            fps: min(max(Int(gifFpsField.stringValue) ?? 12, 1), 60),
+            fps: fps,
             colors: Int(gifColorsPopup.titleOfSelectedItem ?? "128") ?? 128,
             targetBytes: mb.map { Int($0 * 1_000_000) }
         )
