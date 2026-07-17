@@ -18,6 +18,13 @@ struct GifSettings {
     var targetBytes: Int?   // optional max file size; shrinks width to hit it
     var lossy: Int? = nil   // gifsicle --lossy level (nil = skip gifsicle pass)
     var format: VideoOutputFormat = .gif
+    var trimStart: Double? = nil  // seconds; nil = from the beginning
+    var trimEnd: Double? = nil    // seconds; nil = to the end
+
+    /// Seconds of video actually exported once the trim is applied.
+    func exportDuration(fullDuration: Double) -> Double {
+        max((trimEnd ?? fullDuration) - (trimStart ?? 0), 0)
+    }
 
     /// The Compression dropdown doubles as the WebP quality knob:
     /// None → q90, Balanced (30) → q75, Strong (80) → q50.
@@ -74,12 +81,15 @@ enum GifProcessor {
             }
             : nil
 
+        let trim = trimArguments(start: settings.trimStart, end: settings.trimEnd)
+
         while true {
             attempts += 1
             switch settings.format {
             case .gif:
                 try encodeGif(ffmpeg: ffmpeg, input: url, output: output,
-                              width: width, fps: settings.fps, colors: settings.colors)
+                              width: width, fps: settings.fps, colors: settings.colors,
+                              trim: trim)
                 if let gifsicle, let lossy = settings.lossy {
                     // -b rewrites in place; -O3 adds frame-diff + transparency
                     // optimization on top of the lossy LZW recompression.
@@ -88,7 +98,7 @@ enum GifProcessor {
             case .webp:
                 try encodeWebp(ffmpeg: ffmpeg, input: url, output: output,
                                width: width, fps: settings.fps,
-                               quality: settings.webpQuality)
+                               quality: settings.webpQuality, trim: trim)
             }
             let bytes = fileSize(output)
 
@@ -109,8 +119,21 @@ enum GifProcessor {
         }
     }
 
+    /// ffmpeg seek args for a trim range (absolute seconds, pre-clamped by
+    /// Geometry.clampedTrim). `-ss` goes before `-i` — with a re-encode
+    /// ffmpeg decodes from the prior keyframe and drops frames, so input
+    /// seeking is frame-accurate and skips decoding the head of the clip.
+    /// `-t` is an output option limiting the encoded duration.
+    static func trimArguments(start: Double?,
+                              end: Double?) -> (input: [String], output: [String]) {
+        let seek = start.map { ["-ss", String(format: "%.3f", $0)] } ?? []
+        let limit = end.map { ["-t", String(format: "%.3f", $0 - (start ?? 0))] } ?? []
+        return (seek, limit)
+    }
+
     private static func encodeGif(ffmpeg: String, input: URL, output: URL,
-                                  width: Int, fps: Int, colors: Int) throws {
+                                  width: Int, fps: Int, colors: Int,
+                                  trim: (input: [String], output: [String])) throws {
         // stats_mode=diff weights the palette toward pixels that change between
         // frames; diff_mode=rectangle re-encodes only the changing region of
         // each frame. Both shrink output at no quality cost for the static
@@ -118,8 +141,8 @@ enum GifProcessor {
         let filter = "fps=\(fps),scale=\(width):-2:flags=lanczos,"
             + "split[s0][s1];[s0]palettegen=max_colors=\(colors):stats_mode=diff[p];"
             + "[s1][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle"
-        try ToolRunner.run(ffmpeg, [
-            "-y", "-i", input.path,
+        try ToolRunner.run(ffmpeg, ["-y"] + trim.input + ["-i", input.path]
+            + trim.output + [
             "-vf", filter,
             "-loop", "0",
             output.path,
@@ -127,9 +150,10 @@ enum GifProcessor {
     }
 
     private static func encodeWebp(ffmpeg: String, input: URL, output: URL,
-                                   width: Int, fps: Int, quality: Int) throws {
-        try ToolRunner.run(ffmpeg, [
-            "-y", "-i", input.path,
+                                   width: Int, fps: Int, quality: Int,
+                                   trim: (input: [String], output: [String])) throws {
+        try ToolRunner.run(ffmpeg, ["-y"] + trim.input + ["-i", input.path]
+            + trim.output + [
             "-vf", "fps=\(fps),scale=\(width):-2:flags=lanczos",
             "-c:v", "libwebp", "-q:v", "\(quality)",
             "-loop", "0", "-an",
@@ -150,7 +174,8 @@ enum GifProcessor {
                                duration: Double) -> Int {
         let aspect = Double(source.height) / Double(max(source.width, 1))
         let height = (Double(settings.width) * aspect).rounded()
-        let frames = max(Double(settings.fps) * duration, 1)
+        let frames = max(Double(settings.fps)
+            * settings.exportDuration(fullDuration: duration), 1)
         let pixelFrames = frames * Double(settings.width) * height
 
         switch settings.format {

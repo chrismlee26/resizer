@@ -58,6 +58,12 @@ final class OptionsWindowController: NSWindowController {
     /// and the live GIF size estimate. Loaded async after the window opens.
     private var videoInfo: VideoInfo?
 
+    /// Preview + trim controls; only created for single-video drops (one
+    /// GifSettings applies to every video, so a per-clip trim can't).
+    private var trimView: VideoTrimView?
+    private var trimStart: Double?
+    private var trimEnd: Double?
+
     private let outputModePopup = NSPopUpButton()
     private let convertButton = NSButton(title: "Convert", target: nil, action: nil)
     private let spinner = NSProgressIndicator()
@@ -308,7 +314,17 @@ final class OptionsWindowController: NSWindowController {
         row.orientation = .horizontal
         row.spacing = 6
 
-        let rows = NSStackView(views: [gifOriginalLabel, row, gifEstimateLabel])
+        var rowViews: [NSView] = [gifOriginalLabel, row, gifEstimateLabel]
+        if videos.count == 1 {
+            let trim = VideoTrimView()
+            trim.load(url: videos[0])
+            trim.onTrimChanged = { [weak self] start, end in
+                self?.trimChanged(start: start, end: end)
+            }
+            trimView = trim
+            rowViews.insert(trim, at: 0)
+        }
+        let rows = NSStackView(views: rowViews)
         rows.orientation = .vertical
         rows.alignment = .leading
         rows.spacing = 8
@@ -354,8 +370,18 @@ final class OptionsWindowController: NSWindowController {
             + " · " + String(format: "%.1f s", info.duration)
         if videos.count > 1 { text += "  (first of \(videos.count) videos)" }
         gifOriginalLabel.stringValue = text
+        trimView?.setDuration(info.duration)
+        trimView?.setAspectRatio(info.pixelSize)
         updateGifEstimate()
         refreshWindowSize()
+    }
+
+    /// Live trim updates from the slider drag — refresh the estimate so
+    /// the predicted size tracks the shortened clip.
+    private func trimChanged(start: Double?, end: Double?) {
+        trimStart = start
+        trimEnd = end
+        updateGifEstimate()
     }
 
     /// Live "Estimated GIF: ~X MB" readout, recomputed on every settings
@@ -436,7 +462,7 @@ final class OptionsWindowController: NSWindowController {
         let compressionIndex = gifCompressionPopup.indexOfSelectedItem
         let lossy = Self.gifCompressionOptions.indices.contains(compressionIndex)
             ? Self.gifCompressionOptions[compressionIndex].lossy : nil
-        return GifSettings(
+        var settings = GifSettings(
             width: max(Int(gifWidthField.stringValue) ?? 640, 40),
             fps: fps,
             colors: Int(gifColorsPopup.titleOfSelectedItem ?? "128") ?? 128,
@@ -444,6 +470,13 @@ final class OptionsWindowController: NSWindowController {
             lossy: lossy,
             format: currentVideoFormat()
         )
+        if let duration = videoInfo?.duration,
+           let trim = Geometry.clampedTrim(start: trimStart, end: trimEnd,
+                                           duration: duration) {
+            settings.trimStart = trim.start
+            settings.trimEnd = trim.end
+        }
+        return settings
     }
 
     /// In "Ask for name…" mode, run a save panel per file (on the main
@@ -580,6 +613,7 @@ final class OptionsWindowController: NSWindowController {
 
 extension OptionsWindowController: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
+        trimView?.teardown()
         OptionsWindowController.active.removeAll { $0 === self }
     }
 }

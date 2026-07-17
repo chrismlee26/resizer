@@ -68,6 +68,21 @@ enum Geometry {
         }
     }
 
+    /// Validate a requested trim range against the clip duration.
+    /// Returns clamped absolute times, or nil when the trim is a no-op:
+    /// unset, inverted, shorter than 0.1 s, or covering (nearly) the whole
+    /// clip — so a full-range "trim" emits no ffmpeg seek args at all.
+    static func clampedTrim(start: Double?, end: Double?,
+                            duration: Double) -> (start: Double, end: Double)? {
+        guard duration > 0, start != nil || end != nil else { return nil }
+        let epsilon = 0.05
+        let clampedStart = min(max(start ?? 0, 0), duration)
+        let clampedEnd = min(max(end ?? duration, 0), duration)
+        guard clampedEnd - clampedStart >= 0.1 else { return nil }
+        if clampedStart <= epsilon && clampedEnd >= duration - epsilon { return nil }
+        return (clampedStart, clampedEnd)
+    }
+
     /// Short random token for output names. Ambiguous characters excluded.
     static func randomToken(length: Int = 4) -> String {
         let chars = Array("abcdefghjkmnpqrstuvwxyz23456789")

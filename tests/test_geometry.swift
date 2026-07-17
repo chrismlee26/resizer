@@ -82,6 +82,38 @@ let stuck = Geometry.outputURL(for: source, suffix: "800w",
 }
 expectEqual(stuck.path, "/photos/cat-800w-3.jpg", "stuck tokens fall back to counter")
 
+// clampedTrim: no-op cases return nil
+expect(Geometry.clampedTrim(start: nil, end: nil, duration: 10) == nil,
+       "unset trim → nil")
+expect(Geometry.clampedTrim(start: 0, end: 10, duration: 10) == nil,
+       "full-range trim → nil")
+expect(Geometry.clampedTrim(start: 0.04, end: 9.96, duration: 10) == nil,
+       "near-full range (within epsilon) → nil")
+expect(Geometry.clampedTrim(start: 6, end: 4, duration: 10) == nil,
+       "inverted range → nil")
+expect(Geometry.clampedTrim(start: 5.0, end: 5.05, duration: 10) == nil,
+       "sub-0.1s range → nil")
+expect(Geometry.clampedTrim(start: 1, end: 9, duration: 0) == nil,
+       "zero duration → nil")
+
+// clampedTrim: clamping and normal cases
+if let trim = Geometry.clampedTrim(start: 1.5, end: 4.8, duration: 10) {
+    expect(trim.start == 1.5 && trim.end == 4.8,
+           "normal range passes through (got \(trim))")
+} else { expect(false, "expected a trim for 1.5–4.8 of 10s") }
+if let trim = Geometry.clampedTrim(start: -3, end: 4, duration: 10) {
+    expect(trim.start == 0 && trim.end == 4,
+           "negative start clamps to 0 (got \(trim))")
+} else { expect(false, "expected a trim for -3–4 of 10s") }
+if let trim = Geometry.clampedTrim(start: 2, end: 15, duration: 10) {
+    expect(trim.start == 2 && trim.end == 10,
+           "end past duration clamps (got \(trim))")
+} else { expect(false, "expected a trim for 2–15 of 10s") }
+if let trim = Geometry.clampedTrim(start: 2, end: nil, duration: 10) {
+    expect(trim.start == 2 && trim.end == 10,
+           "start-only trim runs to the end (got \(trim))")
+} else { expect(false, "expected a trim for start-only 2s of 10s") }
+
 // Random tokens have the expected shape.
 let token = Geometry.randomToken()
 expect(token.count == 4, "random token is 4 chars (got \(token))")

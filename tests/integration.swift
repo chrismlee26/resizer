@@ -110,6 +110,47 @@ let gifEstimate = GifProcessor.estimatedBytes(
 expect(webpEstimate > 0 && webpEstimate < gifEstimate / 2,
        "webp estimate well under gif (\(webpEstimate) vs \(gifEstimate))")
 
+// Trim: ffmpeg argument construction
+let fullTrim = GifProcessor.trimArguments(start: 1.5, end: 4.75)
+expect(fullTrim.input == ["-ss", "1.500"] && fullTrim.output == ["-t", "3.250"],
+       "trim args for 1.5–4.75 (got \(fullTrim))")
+let noTrim = GifProcessor.trimArguments(start: nil, end: nil)
+expect(noTrim.input.isEmpty && noTrim.output.isEmpty, "no trim → no args")
+let startOnly = GifProcessor.trimArguments(start: 2, end: nil)
+expect(startOnly.input == ["-ss", "2.000"] && startOnly.output.isEmpty,
+       "start-only trim emits only -ss (got \(startOnly))")
+let endOnly = GifProcessor.trimArguments(start: nil, end: 3)
+expect(endOnly.input.isEmpty && endOnly.output == ["-t", "3.000"],
+       "end-only trim emits only -t (got \(endOnly))")
+
+// Trim: estimator scales with the exported duration
+let trimmedEstimate = GifProcessor.estimatedBytes(
+    settings: GifSettings(width: 320, fps: 15, colors: 128, targetBytes: nil,
+                          trimStart: 0, trimEnd: 1),
+    source: PixelSize(width: 320, height: 240), duration: 2)
+let untrimmedEstimate = GifProcessor.estimatedBytes(
+    settings: GifSettings(width: 320, fps: 15, colors: 128, targetBytes: nil),
+    source: PixelSize(width: 320, height: 240), duration: 2)
+expect(trimmedEstimate * 2 == untrimmedEstimate,
+       "half-duration trim halves estimate (\(untrimmedEstimate) → \(trimmedEstimate))")
+
+// Trim: end-to-end conversion of a sub-range
+let trimmedGif = try GifProcessor.convert(
+    mov, settings: GifSettings(width: 320, fps: 15, colors: 256, targetBytes: nil,
+                               trimStart: 0.5, trimEnd: 1.5))
+expect(FileManager.default.fileExists(atPath: trimmedGif.output.path),
+       "trimmed gif output exists")
+expect(trimmedGif.bytes > 0, "trimmed gif is non-empty (\(trimmedGif.bytes) bytes)")
+expect(trimmedGif.bytes < big.bytes,
+       "trimmed gif smaller than full clip (\(trimmedGif.bytes)B < \(big.bytes)B)")
+
+// Trim: WebP path honors the trim too
+let trimmedWebp = try GifProcessor.convert(
+    mov, settings: GifSettings(width: 320, fps: 15, colors: 256, targetBytes: nil,
+                               format: .webp, trimStart: 0.5, trimEnd: 1.5))
+expect(trimmedWebp.bytes > 0 && trimmedWebp.bytes < webpBig.bytes,
+       "trimmed webp smaller than full clip (\(trimmedWebp.bytes)B < \(webpBig.bytes)B)")
+
 // GIF: size estimator sanity
 let base = GifSettings(width: 320, fps: 15, colors: 128, targetBytes: nil)
 let source = PixelSize(width: 320, height: 240)
