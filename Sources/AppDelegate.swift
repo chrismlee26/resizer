@@ -71,11 +71,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let aboutItem = NSMenuItem(title: "About Resizer", action: #selector(showAbout),
                                    keyEquivalent: "")
         aboutItem.target = self
+        aboutItem.image = NSImage(systemSymbolName: "info.circle",
+                                  accessibilityDescription: "About")
         menu.addItem(aboutItem)
 
         let quitItem = NSMenuItem(title: "Quit Resizer",
                                   action: #selector(NSApplication.terminate(_:)),
                                   keyEquivalent: "q")
+        quitItem.image = NSImage(systemSymbolName: "power",
+                                 accessibilityDescription: "Quit")?
+            .withSymbolConfiguration(.init(paletteColors: [.systemRed]))
         menu.addItem(quitItem)
     }
 
