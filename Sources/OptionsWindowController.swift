@@ -38,8 +38,10 @@ final class OptionsWindowController: NSWindowController {
 
     /// Compression presets map to gifsicle --lossy levels; nil skips the
     /// gifsicle pass entirely so it stays usable without the tool installed.
+    /// Levels are deliberately gentle: lossy artifacts (ghosting on motion)
+    /// become noticeable around 80, so that's "Strong", not the default.
     private static let gifCompressionOptions: [(title: String, lossy: Int?)] = [
-        ("None", nil), ("Balanced", 80), ("Strong", 140),
+        ("None", nil), ("Balanced", 30), ("Strong", 80),
     ]
 
     private let gifFormatPopup = NSPopUpButton()
@@ -261,7 +263,7 @@ final class OptionsWindowController: NSWindowController {
             at: Self.gifFpsOptions.firstIndex(of: Self.gifFpsRecommended) ?? 0)
 
         gifCompressionPopup.addItems(withTitles: Self.gifCompressionOptions.map {
-            $0.lossy == 80 ? "\($0.title) (Recommended)" : $0.title
+            $0.lossy == 30 ? "\($0.title) (Recommended)" : $0.title
         })
         // Default to Balanced when gifsicle is around; otherwise None so a
         // fresh install converts without an error out of the box.

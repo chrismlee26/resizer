@@ -52,27 +52,35 @@ expect(squeezed.bytes <= target || squeezed.width == 40,
 
 // GIF: gifsicle lossy pass shrinks output (skipped when not installed)
 if ToolRunner.find("gifsicle") != nil {
-    let lossy = try GifProcessor.convert(
+    let balanced = try GifProcessor.convert(
         mov, settings: GifSettings(width: 320, fps: 15, colors: 256,
-                                   targetBytes: nil, lossy: 140))
-    expect(lossy.bytes > 0, "lossy gif is non-empty (\(lossy.bytes) bytes)")
-    expect(lossy.bytes < big.bytes,
-           "lossy=140 beats uncompressed (\(lossy.bytes)B < \(big.bytes)B)")
-    let lossySize = try ImageProcessor.pixelSize(of: lossy.output)
+                                   targetBytes: nil, lossy: 30))
+    let strong = try GifProcessor.convert(
+        mov, settings: GifSettings(width: 320, fps: 15, colors: 256,
+                                   targetBytes: nil, lossy: 80))
+    expect(balanced.bytes > 0, "balanced gif is non-empty (\(balanced.bytes) bytes)")
+    expect(balanced.bytes < big.bytes,
+           "lossy=30 beats uncompressed (\(balanced.bytes)B < \(big.bytes)B)")
+    expect(strong.bytes < balanced.bytes,
+           "lossy=80 beats lossy=30 (\(strong.bytes)B < \(balanced.bytes)B)")
+    let lossySize = try ImageProcessor.pixelSize(of: balanced.output)
     expect(lossySize.width == 320, "lossy gif keeps width 320, got \(lossySize.width)")
 } else {
     print("skip: gifsicle not installed, lossy tests skipped")
 }
 
-// GIF: lossy estimate scales down
+// GIF: lossy estimate scales down with level
 let plainEstimate = GifProcessor.estimatedBytes(
     settings: GifSettings(width: 320, fps: 15, colors: 128, targetBytes: nil),
     source: PixelSize(width: 320, height: 240), duration: 2)
-let lossyEstimate = GifProcessor.estimatedBytes(
-    settings: GifSettings(width: 320, fps: 15, colors: 128, targetBytes: nil, lossy: 140),
+let balancedEstimate = GifProcessor.estimatedBytes(
+    settings: GifSettings(width: 320, fps: 15, colors: 128, targetBytes: nil, lossy: 30),
     source: PixelSize(width: 320, height: 240), duration: 2)
-expect(lossyEstimate == plainEstimate / 2,
-       "strong lossy halves estimate (\(plainEstimate) → \(lossyEstimate))")
+let strongEstimate = GifProcessor.estimatedBytes(
+    settings: GifSettings(width: 320, fps: 15, colors: 128, targetBytes: nil, lossy: 80),
+    source: PixelSize(width: 320, height: 240), duration: 2)
+expect(balancedEstimate < plainEstimate && strongEstimate < balancedEstimate,
+       "estimates scale with lossy level (\(plainEstimate) → \(balancedEstimate) → \(strongEstimate))")
 
 // WebP: basic conversion
 let webp = try GifProcessor.convert(

@@ -20,10 +20,10 @@ struct GifSettings {
     var format: VideoOutputFormat = .gif
 
     /// The Compression dropdown doubles as the WebP quality knob:
-    /// None → q90, Balanced (80) → q75, Strong (140) → q50.
+    /// None → q90, Balanced (30) → q75, Strong (80) → q50.
     var webpQuality: Int {
         guard let lossy else { return 90 }
-        return lossy >= 140 ? 50 : 75
+        return lossy >= 80 ? 50 : 75
     }
 }
 
@@ -157,10 +157,10 @@ enum GifProcessor {
         case .gif:
             let bitsPerPixel = log2(Double(max(settings.colors, 2)))
             let lzwCompression = 0.5
-            // Typical measured reductions from the gifsicle pass: the UI's
-            // "Balanced" (80) lands near -35%, "Strong" (140) near -50%.
+            // Typical reductions from the gifsicle pass: the UI's
+            // "Balanced" (30) lands near -20%, "Strong" (80) near -35%.
             let lossyFactor = settings.lossy
-                .map { $0 >= 140 ? 0.5 : ($0 >= 80 ? 0.65 : 0.85) } ?? 1.0
+                .map { $0 >= 80 ? 0.65 : ($0 >= 30 ? 0.8 : 0.9) } ?? 1.0
             return Int(pixelFrames * bitsPerPixel / 8 * lzwCompression * lossyFactor)
         case .webp:
             let bytesPerPixelFrame: Double
