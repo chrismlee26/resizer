@@ -17,6 +17,16 @@ swiftc Sources/*.swift \
 
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 
+# Stamp the build number (git commit count) and generate the changelog shown
+# in the About window. Skipped gracefully when building outside a git clone.
+if git rev-parse --git-dir >/dev/null 2>&1; then
+    /usr/libexec/PlistBuddy -c \
+        "Set :CFBundleVersion $(git rev-list --count HEAD)" \
+        "$APP/Contents/Info.plist"
+    git log -n 100 --pretty='%ad  %s' --date=short \
+        > "$APP/Contents/Resources/changelog.txt"
+fi
+
 # Build the .icns from Resources/AppIcon.png (Icons8 "resize" icon) when the
 # source is newer than the cached icns.
 if [ ! -f build/AppIcon.icns ] || [ Resources/AppIcon.png -nt build/AppIcon.icns ]; then

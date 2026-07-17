@@ -68,6 +68,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(hint)
 
         menu.addItem(.separator())
+        let aboutItem = NSMenuItem(title: "About Resizer", action: #selector(showAbout),
+                                   keyEquivalent: "")
+        aboutItem.target = self
+        menu.addItem(aboutItem)
+
         let quitItem = NSMenuItem(title: "Quit Resizer",
                                   action: #selector(NSApplication.terminate(_:)),
                                   keyEquivalent: "q")
@@ -83,6 +88,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuDidClose(_ menu: NSMenu) {
         statusItem.menu = nil
+    }
+
+    @objc private func showAbout() {
+        AboutWindowController.present()
     }
 
     @objc private func openFiles() {
