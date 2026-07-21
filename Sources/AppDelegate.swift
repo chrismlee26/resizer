@@ -8,8 +8,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
 
-        let handleFiles: ([URL]) -> Void = { urls in
-            OptionsWindowController.present(urls: urls)
+        let handleFiles: ([URL]) -> Void = { [weak self] urls in
+            self?.route(urls: urls)
         }
 
         if let button = statusItem.button {
@@ -49,9 +49,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Files dropped on the app icon in Finder / opened via "Open With".
     func application(_ application: NSApplication, open urls: [URL]) {
-        let usable = urls.filter { FileClassifier.kind(of: $0) != nil }
-        if !usable.isEmpty {
-            OptionsWindowController.present(urls: usable)
+        route(urls: urls)
+    }
+
+    /// Send each dropped file to the right editor by kind. Images and videos go
+    /// to the batch options panel; PDFs open the PDF editor. A mixed drop opens
+    /// both — the PDF editor is presented last so it lands frontmost.
+    private func route(urls: [URL]) {
+        let pdfs = urls.filter { FileClassifier.kind(of: $0) == .pdf }
+        let media = urls.filter {
+            let kind = FileClassifier.kind(of: $0)
+            return kind == .image || kind == .video
+        }
+        if !media.isEmpty {
+            OptionsWindowController.present(urls: media)
+        }
+        if !pdfs.isEmpty {
+            PdfEditorWindowController.present(urls: pdfs)
         }
     }
 
@@ -62,7 +76,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         openItem.target = self
         menu.addItem(openItem)
 
-        let hint = NSMenuItem(title: "Drag photos or videos onto the menu bar icon",
+        let hint = NSMenuItem(title: "Drag photos, videos, or PDFs onto the menu bar icon",
                               action: nil, keyEquivalent: "")
         hint.isEnabled = false
         menu.addItem(hint)
@@ -103,10 +117,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
-        panel.allowedContentTypes = [.image, .movie, .video]
+        panel.allowedContentTypes = [.image, .movie, .video, .pdf]
         NSApp.activate(ignoringOtherApps: true)
         if panel.runModal() == .OK {
-            OptionsWindowController.present(urls: panel.urls)
+            route(urls: panel.urls)
         }
     }
 }

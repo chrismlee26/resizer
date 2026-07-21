@@ -75,6 +75,7 @@ final class WindowDropProxy: NSObject, NSWindowDelegate, NSDraggingDestination {
 enum FileKind {
     case image
     case video
+    case pdf
 }
 
 enum FileClassifier {
@@ -82,12 +83,14 @@ enum FileClassifier {
         guard let type = UTType(filenameExtension: url.pathExtension.lowercased()) else {
             return nil
         }
+        // PDF first: it conforms to neither .movie nor .image, but be explicit.
+        if type.conforms(to: .pdf) { return .pdf }
         if type.conforms(to: .movie) || type.conforms(to: .video) { return .video }
         if type.conforms(to: .image) { return .image }
         return nil
     }
 
-    /// Extract the droppable (image/video) file URLs from a drag session.
+    /// Extract the droppable (image/video/pdf) file URLs from a drag session.
     static func urls(from info: NSDraggingInfo) -> [URL] {
         let options: [NSPasteboard.ReadingOptionKey: Any] = [
             .urlReadingFileURLsOnly: true

@@ -11,8 +11,10 @@ final class AboutWindowController: NSWindowController {
     private static var shared: AboutWindowController?
 
     static func present() {
+        let isNew = shared == nil
         let controller = shared ?? AboutWindowController()
         shared = controller
+        if isNew { AppActivation.windowOpened() }
         controller.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
         controller.window?.makeKeyAndOrderFront(nil)
@@ -69,8 +71,9 @@ final class AboutWindowController: NSWindowController {
         version.textColor = .secondaryLabelColor
 
         let description = NSTextField(wrappingLabelWithString:
-            "A tiny menu bar droplet for resizing photos and converting videos "
-            + "to GIF or WebP. Drag files onto the menu bar icon, or use Load File…")
+            "A tiny menu bar droplet for resizing photos, converting videos "
+            + "to GIF or WebP, and editing PDFs. Drag files onto the menu bar "
+            + "icon, or use Load File…")
         description.font = .systemFont(ofSize: 12)
         description.alignment = .center
         description.widthAnchor.constraint(lessThanOrEqualToConstant: 380).isActive = true
@@ -147,5 +150,6 @@ final class AboutWindowController: NSWindowController {
 extension AboutWindowController: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         AboutWindowController.shared = nil
+        AppActivation.windowClosed()
     }
 }

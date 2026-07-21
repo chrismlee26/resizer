@@ -16,6 +16,22 @@ swiftc Sources/Geometry.swift "$SCRATCH/unit/main.swift" \
     -swift-version 5 -o "$SCRATCH/test_geometry"
 "$SCRATCH/test_geometry"
 
+echo "== Unit: pdf model =="
+mkdir -p "$SCRATCH/unit_pdf"
+cp tests/test_pdf_model.swift "$SCRATCH/unit_pdf/main.swift"
+swiftc Sources/PdfEditModel.swift "$SCRATCH/unit_pdf/main.swift" \
+    -swift-version 5 -o "$SCRATCH/test_pdf_model"
+"$SCRATCH/test_pdf_model"
+
+echo "== Integration: pdfkit =="
+mkdir -p "$SCRATCH/int_pdf"
+cp tests/pdf_integration.swift "$SCRATCH/int_pdf/main.swift"
+swiftc Sources/PdfEditModel.swift Sources/PdfAssembler.swift \
+    "$SCRATCH/int_pdf/main.swift" \
+    -swift-version 5 -framework AppKit -framework PDFKit \
+    -o "$SCRATCH/test_pdf_integration"
+"$SCRATCH/test_pdf_integration" "$SCRATCH/int_pdf"
+
 echo "== Integration: sips + ffmpeg =="
 FFMPEG="$(command -v ffmpeg || echo /usr/local/bin/ffmpeg)"
 FIXTURES="$SCRATCH/fixtures"

@@ -1,8 +1,13 @@
 # Resizer
 
-A tiny macOS menu bar droplet for resizing photos and converting videos to
-GIF or animated WebP, built on `sips` (built into macOS), `ffmpeg`
-(Homebrew), and optionally `gifsicle` (Homebrew) for lossy GIF compression.
+A tiny macOS menu bar droplet for resizing photos, converting videos to GIF
+or animated WebP, and editing PDFs — built on `sips` (built into macOS),
+`ffmpeg` (Homebrew), optionally `gifsicle` (Homebrew) for lossy GIF
+compression, and Apple's PDFKit (no external tool) for PDFs.
+
+One droplet, two apps: Resizer detects what you drop and routes it. Images
+and videos open the resize/convert options panel; PDFs open the PDF editor.
+A mixed drop opens both. Everything runs locally.
 
 ## Usage
 
@@ -38,6 +43,47 @@ appears:
     frame, Play replays exactly the selected range, and the size estimate
     tracks the shortened clip. Leave the handles at the ends to export the
     full video.
+
+Drop one or more **PDFs** instead and the **PDF editor** opens:
+
+- **Combine** — dropping several PDFs concatenates them into one working
+  document, in drop order.
+- **Add PDF/Image** — the toolbar button opens more PDFs or images while you
+  work; their pages are appended to the bottom of the list (each image becomes
+  a one-page document). Undoable like any other edit.
+- **Thumbnails + preview** — a scrollable page-thumbnail sidebar sits beside
+  a full-page preview. Selecting a thumbnail scrolls the preview to it, and
+  scrolling the preview highlights the matching thumbnail, so you can verify
+  you're on the right page and see the reassembled document as you go.
+- **Rotate / Delete / Extract** — act on one page or a multi-selection.
+  Rotate turns the selected pages ±90° (a badge shows the applied rotation);
+  Delete removes them; **Extract…** saves the selected pages as a new PDF via
+  a save panel, leaving the working document untouched.
+- **Reorder** — drag thumbnails to change page order; dragging to the top or
+  bottom edge of the sidebar auto-scrolls, so you can move a page any distance.
+  Each thumbnail also has an editable page-number field — type a new number
+  (e.g. change 13 to 1) and confirm with Return or the ✓ button beside the
+  field, and the page jumps to that position, pushing the rest down.
+- **Redact** — toggle **Redact** and drag black boxes over anything sensitive
+  (draw as many as you like; Esc or toggling off exits). On **Export/Extract**,
+  any page carrying a redaction is flattened to a 144-DPI image with the boxes
+  baked in, so the text and vector content underneath is **gone — not just
+  hidden** (it cannot be selected, copied, or recovered). Pages without
+  redactions stay as vector, so flattening only happens where needed. Use
+  **Clear Redactions** to remove the boxes on the selected pages; ⌘Z / Revert
+  work too. The on-screen boxes before export are a reversible preview; only
+  the exported file is flattened.
+- **Undo / Revert** — ⌘Z (or the Undo button) steps back through edits;
+  Revert returns to the pages as originally dropped.
+- **Export…** — writes the reassembled document to a filename you choose
+  (defaults to `name-edited-<random>.pdf`). The export is built fresh from
+  the original files, so source PDFs are never modified, and Resizer refuses
+  a name that would overwrite a source.
+
+Password-protected PDFs prompt for the password on open; encrypted or
+unreadable files in a multi-drop are skipped with a note. PDF editing is
+page-level, so interactive form fields, outlines, and internal links are not
+carried into the exported document.
 
 You can also drop files onto the app icon in Finder, use "Open With →
 Resizer", or pick **Load File…** from the menu bar menu. **About Resizer**
@@ -78,12 +124,23 @@ tests/run_tests.sh    # unit tests (sizing math) + integration (real sips/ffmpeg
   encode, output size estimator, and target-size retry loop
 - `Sources/VideoProbe.swift` — AVFoundation metadata loader (resolution,
   duration, file size) behind the panel's original/estimate labels
-- `Sources/DropView.swift` / `AppDelegate.swift` — status item + drag & drop
+- `Sources/DropView.swift` / `AppDelegate.swift` — status item + drag & drop;
+  classifies each file as image / video / PDF and routes it
 - `Sources/OptionsWindowController.swift` — the options panel
 - `Sources/VideoTrimView.swift` — inline video preview + trim controls for
   single-video drops
 - `Sources/TrimRangeSlider.swift` — custom two-handle range slider (AppKit
   has no native one)
+- `Sources/PdfEditModel.swift` — pure page-list editing logic (combine,
+  reorder, rotate, delete, extract refs, undo/revert), fully unit-tested
+- `Sources/PdfAssembler.swift` — PDFKit plumbing: load, copy pages, assemble
+  a fresh document, thumbnails, and secure flatten-on-export of redacted pages
+- `Sources/PdfRedactOverlayView.swift` — transparent capture layer for drawing
+  redaction boxes over the preview (view→page coordinate conversion)
+- `Sources/PdfThumbnailListView.swift` — NSCollectionView thumbnail sidebar
+  with multi-select, drag-reorder, and lazy off-main thumbnail rendering
+- `Sources/PdfEditorWindowController.swift` — the PDF editor window
+  (sidebar + PDFView preview, toolbar operations, export/extract)
 - `Sources/AboutWindowController.swift` — About window (version, changelog,
   link)
 - `Resources/AppIcon.png` — app icon source; build.sh scales it into the .icns

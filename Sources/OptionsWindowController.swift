@@ -80,6 +80,7 @@ final class OptionsWindowController: NSWindowController {
         guard !images.isEmpty || !videos.isEmpty else { return }
         let controller = OptionsWindowController(images: images, videos: videos)
         active.append(controller)
+        AppActivation.windowOpened()
         controller.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
         controller.window?.makeKeyAndOrderFront(nil)
@@ -615,6 +616,7 @@ extension OptionsWindowController: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         trimView?.teardown()
         OptionsWindowController.active.removeAll { $0 === self }
+        AppActivation.windowClosed()
     }
 }
 
