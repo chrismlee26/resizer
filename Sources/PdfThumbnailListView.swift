@@ -150,12 +150,14 @@ final class PdfThumbnailListView: NSView {
     /// the top or bottom edge, letting a drag reach any position.
     private func startAutoScroll() {
         stopAutoScroll()
-        let timer = Timer(timeInterval: 0.04, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
             self?.autoScrollTick()
         }
-        // AppKit adds the drag's event-tracking mode to the common set, so this
-        // fires during the drag loop (a plain scheduled timer would not).
-        RunLoop.main.add(timer, forMode: .common)
+        // A drag runs the run loop in event-tracking mode; the timer must be
+        // registered for that mode explicitly or it never fires mid-drag (that
+        // was the bug — .common does not reliably include it here).
+        RunLoop.main.add(timer, forMode: .eventTracking)
+        RunLoop.main.add(timer, forMode: .default)
         autoScrollTimer = timer
     }
 
@@ -166,23 +168,28 @@ final class PdfThumbnailListView: NSView {
 
     private func autoScrollTick() {
         guard let window = collectionView.window, pageCount > 0 else { return }
-        let visible = collectionView.indexPathsForVisibleItems().map { $0.item }.sorted()
-        guard let first = visible.first, let last = visible.last else { return }
+        let clip = scrollView.contentView
 
-        // Window coordinates have a fixed orientation (y up), so edge detection
-        // is independent of the collection view's flippedness. scrollToItems
-        // then handles the actual (flip-aware) scrolling.
+        // Detect the edge in window coordinates (fixed y-up orientation), then
+        // scroll the clip view directly for a smooth, steady speed.
         let mouse = window.convertPoint(fromScreen: NSEvent.mouseLocation)
         let frame = scrollView.convert(scrollView.bounds, to: nil)
-        let edge: CGFloat = 44
+        let edge: CGFloat = 40
+        let step: CGFloat = 8   // px/tick at ~60fps ≈ 480 px/s — medium speed
 
-        if mouse.y >= frame.maxY - edge, first > 0 {
-            collectionView.scrollToItems(at: [IndexPath(item: max(0, first - 1), section: 0)],
-                                         scrollPosition: .top)
-        } else if mouse.y <= frame.minY + edge, last < pageCount - 1 {
-            collectionView.scrollToItems(at: [IndexPath(item: min(pageCount - 1, last + 1), section: 0)],
-                                         scrollPosition: .bottom)
+        var dy: CGFloat = 0
+        if mouse.y >= frame.maxY - edge {            // near the visual top
+            dy = collectionView.isFlipped ? -step : step
+        } else if mouse.y <= frame.minY + edge {     // near the visual bottom
+            dy = collectionView.isFlipped ? step : -step
         }
+        guard dy != 0 else { return }
+
+        let maxY = max(0, collectionView.frame.height - clip.bounds.height)
+        let newY = min(max(clip.bounds.origin.y + dy, 0), maxY)
+        guard newY != clip.bounds.origin.y else { return }
+        clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: newY))
+        scrollView.reflectScrolledClipView(clip)
     }
 }
 
