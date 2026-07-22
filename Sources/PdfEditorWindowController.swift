@@ -119,6 +119,13 @@ final class PdfEditorWindowController: NSWindowController {
         window.minSize = NSSize(width: 700, height: 480)
         super.init(window: window)
         window.delegate = self
+
+        // Accept PDFs/images dragged from Finder anywhere over the window —
+        // same effect as the Add PDF/Image button.
+        let dropView = FileDropView()
+        dropView.onFiles = { [weak self] urls in self?.addFiles(urls: urls) }
+        window.contentView = dropView
+
         buildUI()
         window.center()
 
@@ -236,6 +243,9 @@ final class PdfEditorWindowController: NSWindowController {
         pdfView.displayMode = .singlePage
         pdfView.displaysPageBreaks = true
         pdfView.backgroundColor = .underPageBackgroundColor
+        // Let file drops fall through to the window's FileDropView instead of
+        // PDFView trying to open the dropped file itself.
+        pdfView.unregisterDraggedTypes()
         pdfView.translatesAutoresizingMaskIntoConstraints = false
         previewContainer.addSubview(pdfView)
         emptyLabel.textColor = .secondaryLabelColor
@@ -333,8 +343,7 @@ final class PdfEditorWindowController: NSWindowController {
 
     // MARK: - Operations
 
-    /// Add more PDFs and/or images to the open session, appending their pages to
-    /// the bottom of the list. Images become one-page documents.
+    /// Add more PDFs and/or images via the open panel.
     @objc private func addFilesPressed() {
         exitRedactMode()
         let panel = NSOpenPanel()
@@ -345,11 +354,17 @@ final class PdfEditorWindowController: NSWindowController {
         panel.directoryURL = sourceURLs.first?.deletingLastPathComponent()
         NSApp.activate(ignoringOtherApps: true)
         guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+        addFiles(urls: panel.urls)
+    }
 
+    /// Append PDFs and/or images (from the Add panel or a Finder drop) to the
+    /// bottom of the list. Images become one-page documents.
+    private func addFiles(urls: [URL]) {
+        exitRedactMode()
         var newDocs: [PDFDocument] = []
         var newURLs: [URL] = []
         var skipped: [String] = []
-        for url in panel.urls {
+        for url in urls {
             switch FileClassifier.kind(of: url) {
             case .pdf:
                 switch PdfAssembler.load(url: url) {

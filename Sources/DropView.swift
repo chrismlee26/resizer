@@ -72,6 +72,60 @@ final class WindowDropProxy: NSObject, NSWindowDelegate, NSDraggingDestination {
     }
 }
 
+/// A view that accepts file drags from Finder and reports the matching URLs.
+/// Used as a window's content view so drops anywhere over it (that a subview
+/// doesn't consume) are caught — e.g. dropping PDFs/images into the PDF editor.
+final class FileDropView: NSView {
+    var onFiles: (([URL]) -> Void)?
+    /// Which dropped file kinds to accept.
+    var acceptedKinds: Set<FileKind> = [.pdf, .image]
+
+    private var isReceivingDrag = false {
+        didSet { needsDisplay = true }
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        registerForDraggedTypes([.fileURL])
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    private func acceptedURLs(from info: NSDraggingInfo) -> [URL] {
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+        let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self],
+                                                       options: options) as? [URL] ?? []
+        return urls.filter {
+            guard let kind = FileClassifier.kind(of: $0) else { return false }
+            return acceptedKinds.contains(kind)
+        }
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        isReceivingDrag = !acceptedURLs(from: sender).isEmpty
+        return isReceivingDrag ? .copy : []
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) { isReceivingDrag = false }
+    override func draggingEnded(_ sender: NSDraggingInfo) { isReceivingDrag = false }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        isReceivingDrag = false
+        let urls = acceptedURLs(from: sender)
+        guard !urls.isEmpty else { return false }
+        onFiles?(urls)
+        return true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard isReceivingDrag else { return }
+        NSColor.controlAccentColor.setStroke()
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: 6, yRadius: 6)
+        path.lineWidth = 3
+        path.stroke()
+    }
+}
+
 enum FileKind {
     case image
     case video
