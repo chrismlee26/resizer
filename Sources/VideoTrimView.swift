@@ -166,6 +166,9 @@ final class VideoTrimView: NSView {
         // rate, so suppress AVKit's own speed menu (it is coupled to
         // defaultRate and would otherwise drift out of sync with the slider).
         playerView.speeds = []
+        // Hide the full-screen ("present movie") button — this is a small inline
+        // preview, not a player, and it should never take over the screen.
+        playerView.showsFullScreenToggleButton = false
         playerView.translatesAutoresizingMaskIntoConstraints = false
         playerView.widthAnchor.constraint(equalToConstant: Self.previewWidth)
             .isActive = true
