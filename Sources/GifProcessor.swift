@@ -20,10 +20,13 @@ struct GifSettings {
     var format: VideoOutputFormat = .gif
     var trimStart: Double? = nil  // seconds; nil = from the beginning
     var trimEnd: Double? = nil    // seconds; nil = to the end
+    var speed: Double? = nil      // playback multiplier (0.25...4.0); nil = 1x
 
-    /// Seconds of video actually exported once the trim is applied.
+    /// Seconds of output once the trim and speed change are applied.
+    /// A 2x speed halves the exported (and previewed) duration.
     func exportDuration(fullDuration: Double) -> Double {
-        max((trimEnd ?? fullDuration) - (trimStart ?? 0), 0)
+        let trimmed = max((trimEnd ?? fullDuration) - (trimStart ?? 0), 0)
+        return trimmed / (speed ?? 1.0)
     }
 
     /// The Compression dropdown doubles as the WebP quality knob:
@@ -81,7 +84,8 @@ enum GifProcessor {
             }
             : nil
 
-        let trim = trimArguments(start: settings.trimStart, end: settings.trimEnd)
+        let trim = trimArguments(start: settings.trimStart, end: settings.trimEnd,
+                                 speed: settings.speed)
 
         while true {
             attempts += 1
@@ -89,7 +93,7 @@ enum GifProcessor {
             case .gif:
                 try encodeGif(ffmpeg: ffmpeg, input: url, output: output,
                               width: width, fps: settings.fps, colors: settings.colors,
-                              trim: trim)
+                              speed: settings.speed, trim: trim)
                 if let gifsicle, let lossy = settings.lossy {
                     // -b rewrites in place; -O3 adds frame-diff + transparency
                     // optimization on top of the lossy LZW recompression.
@@ -98,7 +102,8 @@ enum GifProcessor {
             case .webp:
                 try encodeWebp(ffmpeg: ffmpeg, input: url, output: output,
                                width: width, fps: settings.fps,
-                               quality: settings.webpQuality, trim: trim)
+                               quality: settings.webpQuality,
+                               speed: settings.speed, trim: trim)
             }
             let bytes = fileSize(output)
 
@@ -123,23 +128,43 @@ enum GifProcessor {
     /// Geometry.clampedTrim). `-ss` goes before `-i` — with a re-encode
     /// ffmpeg decodes from the prior keyframe and drops frames, so input
     /// seeking is frame-accurate and skips decoding the head of the clip.
-    /// `-t` is an output option limiting the encoded duration.
-    static func trimArguments(start: Double?,
-                              end: Double?) -> (input: [String], output: [String]) {
+    /// `-t` is an output option limiting the encoded duration; because it is
+    /// measured in post-setpts time it must be divided by the speed factor,
+    /// or a speed-up would run past the trim end and a slow-down would clip.
+    static func trimArguments(start: Double?, end: Double?,
+                              speed: Double? = nil) -> (input: [String], output: [String]) {
         let seek = start.map { ["-ss", String(format: "%.3f", $0)] } ?? []
-        let limit = end.map { ["-t", String(format: "%.3f", $0 - (start ?? 0))] } ?? []
+        let factor = speed ?? 1.0
+        let limit = end.map {
+            ["-t", String(format: "%.3f", ($0 - (start ?? 0)) / factor)]
+        } ?? []
         return (seek, limit)
+    }
+
+    /// The video filter chain shared by both encoders: optional retime
+    /// (setpts) → frame-rate resample (fps) → width scale. `setpts` must
+    /// precede `fps` so the resample sees retimed timestamps. With `speed`
+    /// nil the result is exactly `fps=<fps>,scale=<width>:-2:flags=lanczos`.
+    static func videoFilters(width: Int, fps: Int, speed: Double? = nil) -> String {
+        var steps: [String] = []
+        if let speed {
+            steps.append("setpts=(PTS-STARTPTS)/\(String(format: "%g", speed))")
+        }
+        steps.append("fps=\(fps)")
+        steps.append("scale=\(width):-2:flags=lanczos")
+        return steps.joined(separator: ",")
     }
 
     private static func encodeGif(ffmpeg: String, input: URL, output: URL,
                                   width: Int, fps: Int, colors: Int,
+                                  speed: Double?,
                                   trim: (input: [String], output: [String])) throws {
         // stats_mode=diff weights the palette toward pixels that change between
         // frames; diff_mode=rectangle re-encodes only the changing region of
         // each frame. Both shrink output at no quality cost for the static
         // parts (big win for screen recordings, modest for full-motion video).
-        let filter = "fps=\(fps),scale=\(width):-2:flags=lanczos,"
-            + "split[s0][s1];[s0]palettegen=max_colors=\(colors):stats_mode=diff[p];"
+        let filter = videoFilters(width: width, fps: fps, speed: speed)
+            + ",split[s0][s1];[s0]palettegen=max_colors=\(colors):stats_mode=diff[p];"
             + "[s1][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle"
         try ToolRunner.run(ffmpeg, ["-y"] + trim.input + ["-i", input.path]
             + trim.output + [
@@ -151,10 +176,11 @@ enum GifProcessor {
 
     private static func encodeWebp(ffmpeg: String, input: URL, output: URL,
                                    width: Int, fps: Int, quality: Int,
+                                   speed: Double?,
                                    trim: (input: [String], output: [String])) throws {
         try ToolRunner.run(ffmpeg, ["-y"] + trim.input + ["-i", input.path]
             + trim.output + [
-            "-vf", "fps=\(fps),scale=\(width):-2:flags=lanczos",
+            "-vf", videoFilters(width: width, fps: fps, speed: speed),
             "-c:v", "libwebp", "-q:v", "\(quality)",
             "-loop", "0", "-an",
             output.path,

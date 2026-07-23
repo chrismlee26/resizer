@@ -51,6 +51,10 @@ final class OptionsWindowController: NSWindowController {
     private let gifColorsLabel = NSTextField(labelWithString: "Colors")
     private let gifCompressionPopup = NSPopUpButton()
     private let gifTargetField = NSTextField(string: "")
+    /// Export speed on a log2 track: -2…2 maps to 25%…400%, 0 = 100%.
+    private let gifSpeedSlider = NSSlider(value: 0, minValue: -2, maxValue: 2,
+                                          target: nil, action: nil)
+    private let gifSpeedValueLabel = NSTextField(labelWithString: "100%")
     private let gifOriginalLabel = NSTextField(labelWithString: "Original: …")
     private let gifEstimateLabel = NSTextField(labelWithString: "")
 
@@ -315,7 +319,20 @@ final class OptionsWindowController: NSWindowController {
         row.orientation = .horizontal
         row.spacing = 6
 
-        var rowViews: [NSView] = [gifOriginalLabel, row, gifEstimateLabel]
+        gifSpeedSlider.target = self
+        gifSpeedSlider.action = #selector(gifSpeedChanged)
+        gifSpeedSlider.isContinuous = true
+        gifSpeedSlider.numberOfTickMarks = 5
+        gifSpeedSlider.allowsTickMarkValuesOnly = false
+        gifSpeedSlider.widthAnchor.constraint(equalToConstant: 200).isActive = true
+        gifSpeedValueLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        gifSpeedValueLabel.textColor = .secondaryLabelColor
+        gifSpeedValueLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+        let speedRow = NSStackView(views: [makeLabel("Speed"), gifSpeedSlider, gifSpeedValueLabel])
+        speedRow.orientation = .horizontal
+        speedRow.spacing = 8
+
+        var rowViews: [NSView] = [gifOriginalLabel, row, speedRow, gifEstimateLabel]
         if videos.count == 1 {
             let trim = VideoTrimView()
             trim.load(url: videos[0])
@@ -404,6 +421,15 @@ final class OptionsWindowController: NSWindowController {
         updateGifEstimate()
     }
 
+    /// Speed slider drag: update the label, retime the live preview, and
+    /// refresh the estimate (a faster export is shorter, hence smaller).
+    @objc private func gifSpeedChanged() {
+        let percent = Geometry.speedPercent(sliderValue: gifSpeedSlider.doubleValue)
+        gifSpeedValueLabel.stringValue = "\(percent)%"
+        trimView?.setPlaybackSpeed(Geometry.speedFactor(percent: Double(percent)) ?? 1.0)
+        updateGifEstimate()
+    }
+
     /// A section header above its content row. (NSBox draws its title over
     /// the content when sized by fittingSize, so sections are plain stacks.)
     private func section(_ title: String, content: NSView) -> NSView {
@@ -477,6 +503,8 @@ final class OptionsWindowController: NSWindowController {
             settings.trimStart = trim.start
             settings.trimEnd = trim.end
         }
+        let speedPercent = Geometry.speedPercent(sliderValue: gifSpeedSlider.doubleValue)
+        settings.speed = Geometry.speedFactor(percent: Double(speedPercent))
         return settings
     }
 

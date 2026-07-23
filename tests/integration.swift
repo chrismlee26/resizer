@@ -151,6 +151,43 @@ let trimmedWebp = try GifProcessor.convert(
 expect(trimmedWebp.bytes > 0 && trimmedWebp.bytes < webpBig.bytes,
        "trimmed webp smaller than full clip (\(trimmedWebp.bytes)B < \(webpBig.bytes)B)")
 
+// Speed: filter construction — no speed leaves today's exact string
+let normalFilter = GifProcessor.videoFilters(width: 320, fps: 15)
+expect(normalFilter == "fps=15,scale=320:-2:flags=lanczos",
+       "no speed → unchanged filter (got \(normalFilter))")
+let fastFilter = GifProcessor.videoFilters(width: 320, fps: 15, speed: 2)
+expect(fastFilter == "setpts=(PTS-STARTPTS)/2,fps=15,scale=320:-2:flags=lanczos",
+       "2x speed prepends setpts before fps (got \(fastFilter))")
+let slowFilter = GifProcessor.videoFilters(width: 320, fps: 15, speed: 0.5)
+expect(slowFilter == "setpts=(PTS-STARTPTS)/0.5,fps=15,scale=320:-2:flags=lanczos",
+       "0.5x speed prepends setpts (got \(slowFilter))")
+
+// Speed: -t scales by 1/speed so the exported window stays correct
+let fastTrim = GifProcessor.trimArguments(start: 1.5, end: 4.75, speed: 2)
+expect(fastTrim.output == ["-t", "1.625"], "2x halves -t (got \(fastTrim.output))")
+let slowTrim = GifProcessor.trimArguments(start: 1.5, end: 4.75, speed: 0.5)
+expect(slowTrim.output == ["-t", "6.500"], "0.5x doubles -t (got \(slowTrim.output))")
+
+// Speed: estimator scales inversely with playback speed
+let normalSpeedEstimate = GifProcessor.estimatedBytes(
+    settings: GifSettings(width: 320, fps: 15, colors: 128, targetBytes: nil),
+    source: PixelSize(width: 320, height: 240), duration: 2)
+let fastEstimate = GifProcessor.estimatedBytes(
+    settings: GifSettings(width: 320, fps: 15, colors: 128, targetBytes: nil, speed: 2),
+    source: PixelSize(width: 320, height: 240), duration: 2)
+expect(fastEstimate * 2 == normalSpeedEstimate,
+       "2x speed halves estimate (\(normalSpeedEstimate) → \(fastEstimate))")
+
+// Speed: end-to-end — 2x smaller, 0.5x larger than the full-speed clip
+let fastGif = try GifProcessor.convert(
+    mov, settings: GifSettings(width: 320, fps: 15, colors: 256, targetBytes: nil, speed: 2))
+expect(fastGif.bytes > 0 && fastGif.bytes < big.bytes,
+       "2x speed gif smaller than normal (\(fastGif.bytes)B < \(big.bytes)B)")
+let slowGif = try GifProcessor.convert(
+    mov, settings: GifSettings(width: 320, fps: 15, colors: 256, targetBytes: nil, speed: 0.5))
+expect(slowGif.bytes > big.bytes,
+       "0.5x speed gif larger than normal (\(slowGif.bytes)B > \(big.bytes)B)")
+
 // GIF: size estimator sanity
 let base = GifSettings(width: 320, fps: 15, colors: 128, targetBytes: nil)
 let source = PixelSize(width: 320, height: 240)

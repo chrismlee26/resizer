@@ -27,6 +27,9 @@ final class VideoTrimView: NSView {
     private let rangeLabel = NSTextField(labelWithString: "")
     private var previewHeightConstraint: NSLayoutConstraint?
     private var duration: Double = 0
+    /// Desired preview playback rate, mirroring the export speed. Held so a
+    /// rate set before load(), or after a seek resets rate to 0, is reapplied.
+    private var playbackRate: Float = 1.0
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -40,6 +43,9 @@ final class VideoTrimView: NSView {
     func load(url: URL) {
         let player = AVPlayer(url: url)
         player.isMuted = true
+        // Since macOS 13, play() resumes at defaultRate, so setting it makes
+        // the preview honor the export speed without re-applying on every play.
+        player.defaultRate = playbackRate
         self.player = player
         playerView.player = player
 
@@ -62,6 +68,15 @@ final class VideoTrimView: NSView {
         rangeSlider.endValue = duration
         rangeSlider.isEnabled = duration > 0
         updateLabels()
+    }
+
+    /// Match the preview's playback rate to the chosen export speed. Applied
+    /// live if the clip is already playing; otherwise it takes effect on the
+    /// next Play via defaultRate.
+    func setPlaybackSpeed(_ factor: Double) {
+        playbackRate = Float(factor)
+        player?.defaultRate = playbackRate
+        if let player, player.rate != 0 { player.rate = playbackRate }
     }
 
     /// Size the preview to the clip's aspect ratio at a fixed width,
@@ -88,6 +103,10 @@ final class VideoTrimView: NSView {
 
     private func buildUI() {
         playerView.controlsStyle = .inline
+        // The export Speed slider is the single source of truth for playback
+        // rate, so suppress AVKit's own speed menu (it is coupled to
+        // defaultRate and would otherwise drift out of sync with the slider).
+        playerView.speeds = []
         playerView.translatesAutoresizingMaskIntoConstraints = false
         playerView.widthAnchor.constraint(equalToConstant: Self.previewWidth)
             .isActive = true

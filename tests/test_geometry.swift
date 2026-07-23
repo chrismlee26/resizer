@@ -114,6 +114,26 @@ if let trim = Geometry.clampedTrim(start: 2, end: nil, duration: 10) {
            "start-only trim runs to the end (got \(trim))")
 } else { expect(false, "expected a trim for start-only 2s of 10s") }
 
+// speedPercent: log2 slider maps to ticked percents
+expectEqual(Geometry.speedPercent(sliderValue: 0), 100, "centre → 100%")
+expectEqual(Geometry.speedPercent(sliderValue: 2), 400, "max → 400%")
+expectEqual(Geometry.speedPercent(sliderValue: -2), 25, "min → 25%")
+expectEqual(Geometry.speedPercent(sliderValue: 1), 200, "+1 → 200%")
+expectEqual(Geometry.speedPercent(sliderValue: -1), 50, "-1 → 50%")
+expectEqual(Geometry.speedPercent(sliderValue: 0.5), 140, "half-step rounds to nearest 5%")
+expectEqual(Geometry.speedPercent(sliderValue: 3), 400, "past max clamps to 400%")
+expectEqual(Geometry.speedPercent(sliderValue: -3), 25, "past min clamps to 25%")
+
+// speedFactor: no-op near 100%, else clamped multiplier
+expect(Geometry.speedFactor(percent: 100) == nil, "100% → nil (no filter)")
+expect(Geometry.speedFactor(percent: 99) == nil, "99% within deadband → nil")
+expect(Geometry.speedFactor(percent: 102) == nil, "102% within deadband → nil")
+expect(Geometry.speedFactor(percent: 0) == nil, "0% → nil")
+expect(Geometry.speedFactor(percent: -50) == nil, "negative → nil")
+expectEqual(Geometry.speedFactor(percent: 150), 1.5, "150% → 1.5x")
+expectEqual(Geometry.speedFactor(percent: 25), 0.25, "25% → 0.25x")
+expectEqual(Geometry.speedFactor(percent: 1000), 4.0, "over-range clamps to 4.0x")
+
 // Random tokens have the expected shape.
 let token = Geometry.randomToken()
 expect(token.count == 4, "random token is 4 chars (got \(token))")

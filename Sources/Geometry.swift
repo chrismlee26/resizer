@@ -83,6 +83,25 @@ enum Geometry {
         return (clampedStart, clampedEnd)
     }
 
+    /// Map a log2 speed-slider position (-2...2, where 0 = normal) to an
+    /// export-speed percent: 100 × 2^v, clamped to 25...400 and rounded to
+    /// the nearest 5. So the slider's five ticks land on 25/50/100/200/400
+    /// and 100% sits dead centre.
+    static func speedPercent(sliderValue: Double) -> Int {
+        let raw = 100.0 * pow(2.0, sliderValue)
+        let clamped = min(max(raw, 25), 400)
+        return Int((clamped / 5).rounded()) * 5
+    }
+
+    /// Validate an export-speed percent. Returns nil for the no-op case
+    /// (within 2.5% of 100, or non-positive) so exporting at 100% emits no
+    /// setpts filter at all; otherwise the playback multiplier percent/100
+    /// clamped to 0.25...4.0.
+    static func speedFactor(percent: Double) -> Double? {
+        guard percent > 0, abs(percent - 100) >= 2.5 else { return nil }
+        return min(max(percent / 100.0, 0.25), 4.0)
+    }
+
     /// Short random token for output names. Ambiguous characters excluded.
     static func randomToken(length: Int = 4) -> String {
         let chars = Array("abcdefghjkmnpqrstuvwxyz23456789")
