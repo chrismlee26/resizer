@@ -43,6 +43,15 @@ appears:
     frame, Play replays exactly the selected range, and the size estimate
     tracks the shortened clip. Leave the handles at the ends to export the
     full video.
+  - **Speed** — a slider from 25% to 400% (100% centered) speeds up or slows
+    down the export. The muted preview plays back at the chosen rate so what
+    you see matches what you get, and the size estimate tracks it (2× speed ≈
+    half the frames).
+  - **Crop** — single-video drops: toggle **Crop**, then drag a box over the
+    preview to export just that region. A crop is a true crop, not a resize —
+    the output is exactly the drawn box at the video's native resolution, so
+    the Width and Max MB fields are disabled while a crop is set. **Clear**
+    removes it; Esc leaves crop mode but keeps the box.
 
 Drop one or more **PDFs** instead and the **PDF editor** opens:
 
