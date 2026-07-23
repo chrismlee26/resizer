@@ -1,9 +1,11 @@
 import AppKit
+import ServiceManagement
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private let menu = NSMenu()
     private let windowDropProxy = WindowDropProxy()
+    private var loginMenuItem: NSMenuItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -82,6 +84,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(hint)
 
         menu.addItem(.separator())
+        let loginItem = NSMenuItem(title: "Start on login",
+                                   action: #selector(toggleLoginItem), keyEquivalent: "")
+        loginItem.target = self
+        menu.addItem(loginItem)
+        loginMenuItem = loginItem
+        updateLoginItemState()
+
+        menu.addItem(.separator())
         let aboutItem = NSMenuItem(title: "About Resizer", action: #selector(showAbout),
                                    keyEquivalent: "")
         aboutItem.target = self
@@ -105,8 +115,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.button?.performClick(nil)
     }
 
+    /// Refresh the login-item checkmark each time the menu opens — the user
+    /// may have toggled it in System Settings › General › Login Items.
+    func menuWillOpen(_ menu: NSMenu) {
+        updateLoginItemState()
+    }
+
     func menuDidClose(_ menu: NSMenu) {
         statusItem.menu = nil
+    }
+
+    // MARK: - Start on login
+
+    @objc private func toggleLoginItem() {
+        let service = SMAppService.mainApp
+        do {
+            if service.status == .enabled {
+                try service.unregister()
+            } else {
+                try service.register()
+            }
+        } catch {
+            presentLoginItemError(error)
+        }
+        updateLoginItemState()
+    }
+
+    private func updateLoginItemState() {
+        loginMenuItem?.state = SMAppService.mainApp.status == .enabled ? .on : .off
+    }
+
+    private func presentLoginItemError(_ error: Error) {
+        let alert = NSAlert()
+        alert.messageText = "Couldn't change “Start on login”"
+        alert.informativeText = error.localizedDescription
+            + "\n\nLogin items work best when Resizer is installed in /Applications."
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     @objc private func showAbout() {

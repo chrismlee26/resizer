@@ -13,7 +13,7 @@ echo "Compiling…"
 swiftc Sources/*.swift \
     -o "$APP/Contents/MacOS/Resizer" \
     -swift-version 5 -O \
-    -framework AppKit -framework PDFKit
+    -framework AppKit -framework PDFKit -framework ServiceManagement
 
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 
