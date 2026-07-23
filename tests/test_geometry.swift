@@ -134,6 +134,66 @@ expectEqual(Geometry.speedFactor(percent: 150), 1.5, "150% → 1.5x")
 expectEqual(Geometry.speedFactor(percent: 25), 0.25, "25% → 0.25x")
 expectEqual(Geometry.speedFactor(percent: 1000), 4.0, "over-range clamps to 4.0x")
 
+// aspectFitFrame: letterbox math for the crop overlay
+let fit16by9 = Geometry.aspectFitFrame(content: PixelSize(width: 320, height: 180),
+                                       containerWidth: 320, containerHeight: 240)
+expect(fit16by9.x == 0 && fit16by9.width == 320,
+       "16:9 in 320×240 fills width (got \(fit16by9))")
+expect(fit16by9.y == 30 && fit16by9.height == 180,
+       "16:9 letterboxes to y=30 h=180 (got \(fit16by9))")
+let fitExact = Geometry.aspectFitFrame(content: PixelSize(width: 100, height: 100),
+                                       containerWidth: 200, containerHeight: 200)
+expect(fitExact.x == 0 && fitExact.y == 0 && fitExact.width == 200 && fitExact.height == 200,
+       "same aspect fills the container (got \(fitExact))")
+
+// normalizedCrop: order, clamp, and Y-flip (view is bottom-left)
+let fullFit = (x: 0.0, y: 0.0, width: 320.0, height: 240.0)
+if let n = Geometry.normalizedCrop(from: (0, 0), to: (320, 240), fit: fullFit) {
+    expect(abs(n.x) < 1e-9 && abs(n.y) < 1e-9
+           && abs(n.width - 1) < 1e-9 && abs(n.height - 1) < 1e-9,
+           "full drag → whole frame (got \(n))")
+} else { expect(false, "full-frame drag should normalize") }
+if let n = Geometry.normalizedCrop(from: (320, 240), to: (0, 0), fit: fullFit) {
+    expect(abs(n.width - 1) < 1e-9 && abs(n.height - 1) < 1e-9,
+           "reversed corners normalize the same (got \(n))")
+} else { expect(false, "reversed drag should normalize") }
+if let n = Geometry.normalizedCrop(from: (0, 0), to: (320, 120), fit: fullFit) {
+    expect(abs(n.y - 0.5) < 1e-9 && abs(n.height - 0.5) < 1e-9,
+           "bottom-half view drag maps to top-left y=0.5,h=0.5 (got \(n))")
+} else { expect(false, "bottom-half drag should normalize") }
+let insetFit = (x: 0.0, y: 30.0, width: 320.0, height: 180.0)
+if let n = Geometry.normalizedCrop(from: (-50, -50), to: (400, 300), fit: insetFit) {
+    expect(abs(n.x) < 1e-9 && abs(n.y) < 1e-9
+           && abs(n.width - 1) < 1e-9 && abs(n.height - 1) < 1e-9,
+           "drag beyond frame clamps to full (got \(n))")
+} else { expect(false, "over-drag should clamp, not nil") }
+expect(Geometry.normalizedCrop(from: (10, 10), to: (12, 12), fit: fullFit) == nil,
+       "tiny drag → nil")
+expect(Geometry.normalizedCrop(from: (0, 0), to: (320, 20), fit: insetFit) == nil,
+       "drag entirely inside a letterbox bar → nil")
+
+// pixelCrop: normalized → source pixels, even dims, clamped, no-op contract
+if let px = Geometry.pixelCrop(NormalizedRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5),
+                               in: PixelSize(width: 640, height: 480)) {
+    expectEqual(px, CropRect(x: 160, y: 120, width: 320, height: 240),
+                "quarter-centered crop → 160,120,320,240")
+} else { expect(false, "mid crop should map to pixels") }
+expect(Geometry.pixelCrop(NormalizedRect(x: 0, y: 0, width: 1, height: 1),
+                          in: PixelSize(width: 640, height: 480)) == nil,
+       "full-frame crop → nil (no-op)")
+expect(Geometry.pixelCrop(NormalizedRect(x: 0.005, y: 0.005, width: 0.99, height: 0.99),
+                          in: PixelSize(width: 640, height: 480)) == nil,
+       "within-1% of full → nil")
+expect(Geometry.pixelCrop(NormalizedRect(x: 0, y: 0, width: 0.01, height: 0.01),
+                          in: PixelSize(width: 640, height: 480)) == nil,
+       "sub-16px crop → nil")
+if let px = Geometry.pixelCrop(NormalizedRect(x: 0.5, y: 0.5, width: 0.5, height: 0.5),
+                               in: PixelSize(width: 641, height: 481)) {
+    expect(px.width % 2 == 0 && px.height % 2 == 0, "crop dims are even (got \(px))")
+    expect(px.x + px.width <= 641 && px.y + px.height <= 481,
+           "crop stays inside the frame (got \(px))")
+} else { expect(false, "half crop of odd-sized frame should map") }
+
 // Random tokens have the expected shape.
 let token = Geometry.randomToken()
 expect(token.count == 4, "random token is 4 chars (got \(token))")

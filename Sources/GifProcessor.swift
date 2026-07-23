@@ -21,6 +21,8 @@ struct GifSettings {
     var trimStart: Double? = nil  // seconds; nil = from the beginning
     var trimEnd: Double? = nil    // seconds; nil = to the end
     var speed: Double? = nil      // playback multiplier (0.25...4.0); nil = 1x
+    var crop: CropRect? = nil     // source-pixel crop; nil = full frame. When
+                                  // set, output is the crop at native size.
 
     /// Seconds of output once the trim and speed change are applied.
     /// A 2x speed halves the exported (and previewed) duration.
@@ -71,7 +73,9 @@ enum GifProcessor {
 
         var width = settings.width
         var attempts = 0
-        let maxAttempts = settings.targetBytes == nil ? 1 : 5
+        // A crop exports at native resolution (no scale step to shrink), so the
+        // Max-MB retry loop does not apply — one attempt only.
+        let maxAttempts = (settings.targetBytes == nil || settings.crop != nil) ? 1 : 5
 
         // Resolve gifsicle up front so a missing tool fails before the
         // (slow) ffmpeg encode, not after it. WebP never needs it.
@@ -93,7 +97,7 @@ enum GifProcessor {
             case .gif:
                 try encodeGif(ffmpeg: ffmpeg, input: url, output: output,
                               width: width, fps: settings.fps, colors: settings.colors,
-                              speed: settings.speed, trim: trim)
+                              speed: settings.speed, crop: settings.crop, trim: trim)
                 if let gifsicle, let lossy = settings.lossy {
                     // -b rewrites in place; -O3 adds frame-diff + transparency
                     // optimization on top of the lossy LZW recompression.
@@ -103,7 +107,7 @@ enum GifProcessor {
                 try encodeWebp(ffmpeg: ffmpeg, input: url, output: output,
                                width: width, fps: settings.fps,
                                quality: settings.webpQuality,
-                               speed: settings.speed, trim: trim)
+                               speed: settings.speed, crop: settings.crop, trim: trim)
             }
             let bytes = fileSize(output)
 
@@ -142,28 +146,36 @@ enum GifProcessor {
     }
 
     /// The video filter chain shared by both encoders: optional retime
-    /// (setpts) → frame-rate resample (fps) → width scale. `setpts` must
-    /// precede `fps` so the resample sees retimed timestamps. With `speed`
-    /// nil the result is exactly `fps=<fps>,scale=<width>:-2:flags=lanczos`.
-    static func videoFilters(width: Int, fps: Int, speed: Double? = nil) -> String {
+    /// (setpts) → frame-rate resample (fps) → then either an exact crop OR a
+    /// width scale. `setpts` must precede `fps` so the resample sees retimed
+    /// timestamps. A `crop` replaces the scale step so the export keeps the
+    /// region's native resolution; the Width setting does not apply. With both
+    /// `speed` and `crop` nil the result is exactly today's
+    /// `fps=<fps>,scale=<width>:-2:flags=lanczos`.
+    static func videoFilters(width: Int, fps: Int,
+                             speed: Double? = nil, crop: CropRect? = nil) -> String {
         var steps: [String] = []
         if let speed {
             steps.append("setpts=(PTS-STARTPTS)/\(String(format: "%g", speed))")
         }
         steps.append("fps=\(fps)")
-        steps.append("scale=\(width):-2:flags=lanczos")
+        if let crop {
+            steps.append("crop=\(crop.width):\(crop.height):\(crop.x):\(crop.y)")
+        } else {
+            steps.append("scale=\(width):-2:flags=lanczos")
+        }
         return steps.joined(separator: ",")
     }
 
     private static func encodeGif(ffmpeg: String, input: URL, output: URL,
                                   width: Int, fps: Int, colors: Int,
-                                  speed: Double?,
+                                  speed: Double?, crop: CropRect?,
                                   trim: (input: [String], output: [String])) throws {
         // stats_mode=diff weights the palette toward pixels that change between
         // frames; diff_mode=rectangle re-encodes only the changing region of
         // each frame. Both shrink output at no quality cost for the static
         // parts (big win for screen recordings, modest for full-motion video).
-        let filter = videoFilters(width: width, fps: fps, speed: speed)
+        let filter = videoFilters(width: width, fps: fps, speed: speed, crop: crop)
             + ",split[s0][s1];[s0]palettegen=max_colors=\(colors):stats_mode=diff[p];"
             + "[s1][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle"
         try ToolRunner.run(ffmpeg, ["-y"] + trim.input + ["-i", input.path]
@@ -176,11 +188,11 @@ enum GifProcessor {
 
     private static func encodeWebp(ffmpeg: String, input: URL, output: URL,
                                    width: Int, fps: Int, quality: Int,
-                                   speed: Double?,
+                                   speed: Double?, crop: CropRect?,
                                    trim: (input: [String], output: [String])) throws {
         try ToolRunner.run(ffmpeg, ["-y"] + trim.input + ["-i", input.path]
             + trim.output + [
-            "-vf", videoFilters(width: width, fps: fps, speed: speed),
+            "-vf", videoFilters(width: width, fps: fps, speed: speed, crop: crop),
             "-c:v", "libwebp", "-q:v", "\(quality)",
             "-loop", "0", "-an",
             output.path,
@@ -198,11 +210,21 @@ enum GifProcessor {
     /// (q90 ≈ 0.08, q75 ≈ 0.05, q50 ≈ 0.035).
     static func estimatedBytes(settings: GifSettings, source: PixelSize,
                                duration: Double) -> Int {
-        let aspect = Double(source.height) / Double(max(source.width, 1))
-        let height = (Double(settings.width) * aspect).rounded()
+        // A crop exports at its own native dimensions; otherwise the width
+        // setting drives the output and height follows the source aspect.
+        let outWidth: Double
+        let outHeight: Double
+        if let crop = settings.crop {
+            outWidth = Double(crop.width)
+            outHeight = Double(crop.height)
+        } else {
+            let aspect = Double(source.height) / Double(max(source.width, 1))
+            outWidth = Double(settings.width)
+            outHeight = (Double(settings.width) * aspect).rounded()
+        }
         let frames = max(Double(settings.fps)
             * settings.exportDuration(fullDuration: duration), 1)
-        let pixelFrames = frames * Double(settings.width) * height
+        let pixelFrames = frames * outWidth * outHeight
 
         switch settings.format {
         case .gif:

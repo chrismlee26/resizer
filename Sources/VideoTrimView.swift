@@ -17,6 +17,8 @@ final class VideoTrimView: NSView {
     private static let timescale: CMTimeScale = 600
 
     var onTrimChanged: ((Double?, Double?) -> Void)?
+    /// Reports the committed crop (top-left normalized 0...1), or nil on Clear.
+    var onCropChanged: ((NormalizedRect?) -> Void)?
 
     private let playerView = AVPlayerView()
     private var player: AVPlayer?
@@ -27,6 +29,13 @@ final class VideoTrimView: NSView {
     private let rangeLabel = NSTextField(labelWithString: "")
     private var previewHeightConstraint: NSLayoutConstraint?
     private var duration: Double = 0
+
+    // Crop overlay + its controls.
+    private let cropOverlay = CropOverlayView()
+    private let cropButton = NSButton(title: "Crop", target: nil, action: nil)
+    private let clearCropButton = NSButton(title: "Clear", target: nil, action: nil)
+    private let cropInfoLabel = NSTextField(labelWithString: "")
+    private var videoPixelSize: PixelSize?
     /// Desired preview playback rate, mirroring the export speed. Held so a
     /// rate set before load(), or after a seek resets rate to 0, is reapplied.
     private var playbackRate: Float = 1.0
@@ -86,6 +95,56 @@ final class VideoTrimView: NSView {
         let height = min(max(Self.previewWidth * aspect, Self.minPreviewHeight),
                          Self.maxPreviewHeight)
         previewHeightConstraint?.constant = height
+        // Crop needs the true pixel size to map the drawn box and to size the
+        // output; only now (after the async probe) is it available.
+        videoPixelSize = size
+        cropOverlay.contentSize = size
+        cropButton.isEnabled = true
+    }
+
+    // MARK: - Crop handling
+
+    @objc private func toggleCrop() {
+        // .pushOnPushOff has already flipped the state by the time this fires.
+        if cropButton.state == .on { enterCropMode() } else { exitCropMode() }
+    }
+
+    private func enterCropMode() {
+        cropOverlay.isActive = true
+        cropButton.state = .on
+        window?.makeFirstResponder(cropOverlay)
+    }
+
+    private func exitCropMode() {
+        cropOverlay.isActive = false
+        cropButton.state = .off
+        if window?.firstResponder === cropOverlay {
+            window?.makeFirstResponder(nil)
+        }
+    }
+
+    @objc private func clearCrop() {
+        cropOverlay.committedCrop = nil
+        clearCropButton.isEnabled = false
+        updateCropInfo()
+        onCropChanged?(nil)
+    }
+
+    private func cropChanged(_ rect: NormalizedRect?) {
+        clearCropButton.isEnabled = rect != nil
+        updateCropInfo()
+        onCropChanged?(rect)
+    }
+
+    private func updateCropInfo() {
+        guard let crop = cropOverlay.committedCrop, let size = videoPixelSize,
+              let pixels = Geometry.pixelCrop(crop, in: size) else {
+            cropInfoLabel.stringValue = ""
+            cropInfoLabel.isHidden = true
+            return
+        }
+        cropInfoLabel.stringValue = "Crop: \(pixels.width) × \(pixels.height) px"
+        cropInfoLabel.isHidden = false
     }
 
     /// Stop playback when the owning window closes.
@@ -134,7 +193,9 @@ final class VideoTrimView: NSView {
         sliderRow.orientation = .horizontal
         sliderRow.spacing = 8
 
-        let stack = NSStackView(views: [playerView, sliderRow, rangeLabel])
+        let cropRow = buildCropRow()
+
+        let stack = NSStackView(views: [playerView, cropRow, sliderRow, rangeLabel])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 6
@@ -146,6 +207,40 @@ final class VideoTrimView: NSView {
             stack.topAnchor.constraint(equalTo: topAnchor),
             stack.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+
+        // The overlay sits on top of the player, pinned to its exact bounds so
+        // a box drawn in view space maps cleanly onto the displayed video.
+        cropOverlay.translatesAutoresizingMaskIntoConstraints = false
+        cropOverlay.isHidden = true
+        cropOverlay.onCropChanged = { [weak self] rect in self?.cropChanged(rect) }
+        cropOverlay.onExit = { [weak self] in self?.exitCropMode() }
+        addSubview(cropOverlay)
+        NSLayoutConstraint.activate([
+            cropOverlay.leadingAnchor.constraint(equalTo: playerView.leadingAnchor),
+            cropOverlay.trailingAnchor.constraint(equalTo: playerView.trailingAnchor),
+            cropOverlay.topAnchor.constraint(equalTo: playerView.topAnchor),
+            cropOverlay.bottomAnchor.constraint(equalTo: playerView.bottomAnchor),
+        ])
+    }
+
+    private func buildCropRow() -> NSStackView {
+        cropButton.setButtonType(.pushOnPushOff)
+        cropButton.bezelStyle = .rounded
+        cropButton.target = self
+        cropButton.action = #selector(toggleCrop)
+        cropButton.isEnabled = false   // enabled once the pixel size is known
+        clearCropButton.bezelStyle = .rounded
+        clearCropButton.target = self
+        clearCropButton.action = #selector(clearCrop)
+        clearCropButton.isEnabled = false
+        cropInfoLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        cropInfoLabel.textColor = .secondaryLabelColor
+        cropInfoLabel.isHidden = true
+
+        let row = NSStackView(views: [cropButton, clearCropButton, cropInfoLabel])
+        row.orientation = .horizontal
+        row.spacing = 8
+        return row
     }
 
     // MARK: - Trim handling

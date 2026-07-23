@@ -67,6 +67,8 @@ final class OptionsWindowController: NSWindowController {
     private var trimView: VideoTrimView?
     private var trimStart: Double?
     private var trimEnd: Double?
+    /// Committed crop from the preview (top-left normalized 0...1), or nil.
+    private var cropNormalized: NormalizedRect?
 
     private let outputModePopup = NSPopUpButton()
     private let convertButton = NSButton(title: "Convert", target: nil, action: nil)
@@ -339,6 +341,9 @@ final class OptionsWindowController: NSWindowController {
             trim.onTrimChanged = { [weak self] start, end in
                 self?.trimChanged(start: start, end: end)
             }
+            trim.onCropChanged = { [weak self] rect in
+                self?.cropChanged(rect)
+            }
             trimView = trim
             rowViews.insert(trim, at: 0)
         }
@@ -400,6 +405,24 @@ final class OptionsWindowController: NSWindowController {
         trimStart = start
         trimEnd = end
         updateGifEstimate()
+    }
+
+    /// Crop drawn or cleared on the preview. A crop exports at native
+    /// resolution, so Width and Max MB (which resize) are disabled while one
+    /// is set, and re-enabled on Clear.
+    private func cropChanged(_ rect: NormalizedRect?) {
+        cropNormalized = rect
+        let hasCrop = currentCrop() != nil
+        gifWidthField.isEnabled = !hasCrop
+        gifTargetField.isEnabled = !hasCrop
+        updateGifEstimate()
+    }
+
+    /// The committed crop resolved to source pixels, or nil (also nil for a
+    /// no-op box, e.g. one that maps to nearly the whole frame).
+    private func currentCrop() -> CropRect? {
+        guard let info = videoInfo, let norm = cropNormalized else { return nil }
+        return Geometry.pixelCrop(norm, in: info.pixelSize)
     }
 
     /// Live "Estimated GIF: ~X MB" readout, recomputed on every settings
@@ -505,6 +528,12 @@ final class OptionsWindowController: NSWindowController {
         }
         let speedPercent = Geometry.speedPercent(sliderValue: gifSpeedSlider.doubleValue)
         settings.speed = Geometry.speedFactor(percent: Double(speedPercent))
+        // A crop exports at native size, so it overrides width and the Max-MB
+        // target (both resize the output).
+        if let crop = currentCrop() {
+            settings.crop = crop
+            settings.targetBytes = nil
+        }
         return settings
     }
 

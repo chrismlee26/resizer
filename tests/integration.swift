@@ -188,6 +188,45 @@ let slowGif = try GifProcessor.convert(
 expect(slowGif.bytes > big.bytes,
        "0.5x speed gif larger than normal (\(slowGif.bytes)B > \(big.bytes)B)")
 
+// Crop: filter uses crop and drops scale entirely (exact-size, native res)
+let cropFilter = GifProcessor.videoFilters(
+    width: 320, fps: 15, crop: CropRect(x: 80, y: 60, width: 160, height: 120))
+expect(cropFilter == "fps=15,crop=160:120:80:60",
+       "crop replaces scale (got \(cropFilter))")
+let cropSpeedFilter = GifProcessor.videoFilters(
+    width: 320, fps: 15, speed: 2, crop: CropRect(x: 0, y: 0, width: 200, height: 100))
+expect(cropSpeedFilter == "setpts=(PTS-STARTPTS)/2,fps=15,crop=200:100:0:0",
+       "crop and speed compose (got \(cropSpeedFilter))")
+
+// Crop: estimator uses the crop's own dimensions as the output size
+let cropEstimate = GifProcessor.estimatedBytes(
+    settings: GifSettings(width: 320, fps: 15, colors: 128, targetBytes: nil,
+                          crop: CropRect(x: 0, y: 0, width: 160, height: 120)),
+    source: PixelSize(width: 320, height: 240), duration: 2)
+let fullAreaEstimate = GifProcessor.estimatedBytes(
+    settings: GifSettings(width: 320, fps: 15, colors: 128, targetBytes: nil),
+    source: PixelSize(width: 320, height: 240), duration: 2)
+expect(cropEstimate * 4 == fullAreaEstimate,
+       "quarter-area crop quarters the estimate (\(fullAreaEstimate) → \(cropEstimate))")
+
+// Crop: end-to-end — output is exactly the crop size, ignoring Width
+let croppedGif = try GifProcessor.convert(
+    mov, settings: GifSettings(width: 999, fps: 15, colors: 256, targetBytes: nil,
+                               crop: CropRect(x: 80, y: 60, width: 160, height: 120)))
+expect(croppedGif.attempts == 1, "crop forces a single attempt (\(croppedGif.attempts))")
+let croppedSize = try ImageProcessor.pixelSize(of: croppedGif.output)
+expect(croppedSize == PixelSize(width: 160, height: 120),
+       "cropped gif is exactly 160×120 despite Width 999, got \(croppedSize)")
+
+// Crop: WebP path honors the crop too, at native size
+let croppedWebp = try GifProcessor.convert(
+    mov, settings: GifSettings(width: 999, fps: 15, colors: 256, targetBytes: nil,
+                               format: .webp,
+                               crop: CropRect(x: 80, y: 60, width: 160, height: 120)))
+let croppedWebpSize = try ImageProcessor.pixelSize(of: croppedWebp.output)
+expect(croppedWebpSize == PixelSize(width: 160, height: 120),
+       "cropped webp is exactly 160×120, got \(croppedWebpSize)")
+
 // GIF: size estimator sanity
 let base = GifSettings(width: 320, fps: 15, colors: 128, targetBytes: nil)
 let source = PixelSize(width: 320, height: 240)

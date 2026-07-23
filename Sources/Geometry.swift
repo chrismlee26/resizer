@@ -7,6 +7,26 @@ struct PixelSize: Equatable {
     let height: Int
 }
 
+/// A crop region expressed as fractions of the video frame: top-left origin,
+/// every field in 0...1. Stored by the UI so it survives preview relayout;
+/// converted to source pixels only at export time.
+struct NormalizedRect: Equatable {
+    let x: Double
+    let y: Double
+    let width: Double
+    let height: Double
+}
+
+/// A crop region in source pixels: top-left origin, matching ffmpeg's
+/// `crop=w:h:x:y` filter. width/height are the exact output dimensions — a
+/// crop is exported at native resolution, never scaled.
+struct CropRect: Equatable {
+    let x: Int
+    let y: Int
+    let width: Int
+    let height: Int
+}
+
 enum ResizeMode: Equatable {
     case percent(Double)        // 0 < p, e.g. 50.0 for half size
     case fit(PixelSize)         // fit within box, preserve aspect
@@ -100,6 +120,76 @@ enum Geometry {
     static func speedFactor(percent: Double) -> Double? {
         guard percent > 0, abs(percent - 100) >= 2.5 else { return nil }
         return min(max(percent / 100.0, 0.25), 4.0)
+    }
+
+    /// Where an aspect-fit (`.resizeAspect`) render of `content` lands inside
+    /// a container, in bottom-left view coordinates. This reproduces where an
+    /// AVPlayerView actually draws the video (letterbox/pillarbox bars are the
+    /// leftover space), so a box drawn over the view can be mapped back to the
+    /// frame. Returns the full container for degenerate inputs.
+    static func aspectFitFrame(content: PixelSize,
+                               containerWidth: Double,
+                               containerHeight: Double)
+        -> (x: Double, y: Double, width: Double, height: Double) {
+        guard content.width > 0, content.height > 0,
+              containerWidth > 0, containerHeight > 0 else {
+            return (0, 0, max(containerWidth, 0), max(containerHeight, 0))
+        }
+        let scale = min(containerWidth / Double(content.width),
+                        containerHeight / Double(content.height))
+        let w = Double(content.width) * scale
+        let h = Double(content.height) * scale
+        return ((containerWidth - w) / 2, (containerHeight - h) / 2, w, h)
+    }
+
+    /// Normalize a drag (two corners in bottom-left view coords) against the
+    /// displayed video's `fit` frame: order the corners, intersect with the
+    /// fit frame, flip Y to a top-left origin, and divide by the fit size.
+    /// Returns nil when the intersection is under `minPoints` in either axis —
+    /// a stray click, or a drag lying entirely in a letterbox bar.
+    static func normalizedCrop(from a: (x: Double, y: Double),
+                               to b: (x: Double, y: Double),
+                               fit: (x: Double, y: Double, width: Double, height: Double),
+                               minPoints: Double = 4) -> NormalizedRect? {
+        guard fit.width > 0, fit.height > 0 else { return nil }
+        let left = max(min(a.x, b.x), fit.x)
+        let right = min(max(a.x, b.x), fit.x + fit.width)
+        let bottom = max(min(a.y, b.y), fit.y)
+        let top = min(max(a.y, b.y), fit.y + fit.height)
+        let w = right - left
+        let h = top - bottom
+        guard w >= minPoints, h >= minPoints else { return nil }
+        let nx = (left - fit.x) / fit.width
+        let nw = w / fit.width
+        let nh = h / fit.height
+        // View y grows upward; crop y grows downward from the top edge.
+        let ny = 1.0 - (bottom - fit.y) / fit.height - nh
+        return NormalizedRect(x: nx, y: ny, width: nw, height: nh)
+    }
+
+    /// Convert a normalized crop to integer source pixels: scale by the source
+    /// size, round, force even width/height (safe encoder input), and clamp so
+    /// the rect stays fully inside the frame. Returns nil when the result is
+    /// under `minPixels` in either axis or covers essentially the whole frame
+    /// (within 1% of every edge) — mirroring clampedTrim's no-op contract. The
+    /// returned width/height ARE the exported dimensions (a crop is not scaled).
+    static func pixelCrop(_ crop: NormalizedRect, in source: PixelSize,
+                          minPixels: Int = 16) -> CropRect? {
+        guard source.width > 0, source.height > 0 else { return nil }
+        let epsilon = 0.01
+        if crop.x <= epsilon, crop.y <= epsilon,
+           crop.x + crop.width >= 1 - epsilon,
+           crop.y + crop.height >= 1 - epsilon { return nil }
+
+        let sw = Double(source.width), sh = Double(source.height)
+        var w = Int((crop.width * sw).rounded())
+        var h = Int((crop.height * sh).rounded())
+        w -= w % 2
+        h -= h % 2
+        guard w >= minPixels, h >= minPixels else { return nil }
+        let x = min(max(Int((crop.x * sw).rounded()), 0), source.width - w)
+        let y = min(max(Int((crop.y * sh).rounded()), 0), source.height - h)
+        return CropRect(x: x, y: y, width: w, height: h)
     }
 
     /// Short random token for output names. Ambiguous characters excluded.
