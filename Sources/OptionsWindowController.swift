@@ -36,6 +36,11 @@ final class OptionsWindowController: NSWindowController {
     private static let gifFpsOptions = [30, 24, 20, 15, 12, 10, 8, 5]
     private static let gifFpsRecommended = 15
 
+    /// The video section sizes its preview, trim slider and info bar to one
+    /// content width so they line up and centre on the video; the controls
+    /// grid sits left-aligned within it.
+    private static let videoContentWidth: CGFloat = 560
+
     /// Compression presets map to gifsicle --lossy levels; nil skips the
     /// gifsicle pass entirely so it stays usable without the tool installed.
     /// Levels are deliberately gentle: lossy artifacts (ghosting on motion)
@@ -50,7 +55,6 @@ final class OptionsWindowController: NSWindowController {
     private let gifColorsPopup = NSPopUpButton()
     private let gifColorsLabel = NSTextField(labelWithString: "Colors")
     private let gifCompressionPopup = NSPopUpButton()
-    private let gifTargetField = NSTextField(string: "")
     /// Export speed on a log2 track: -2…2 maps to 25%…400%, 0 = 100%.
     private let gifSpeedSlider = NSSlider(value: 0, minValue: -2, maxValue: 2,
                                           target: nil, action: nil)
@@ -117,22 +121,30 @@ final class OptionsWindowController: NSWindowController {
         stack.spacing = 12
         stack.edgeInsets = NSEdgeInsets(top: 16, left: 20, bottom: 16, right: 20)
 
+        outputModePopup.addItems(withTitles: ["Auto-named copy", "Ask for name…"])
+        revealCheckbox.state = .on
+
         stack.addArrangedSubview(fileSummaryLabel())
         if !images.isEmpty { stack.addArrangedSubview(imageSection()) }
-        if !videos.isEmpty { stack.addArrangedSubview(gifSection()) }
-
-        outputModePopup.addItems(withTitles: ["Auto-named copy", "Ask for name…"])
-        let outputRow = NSStackView(views: [makeLabel("Output:"), outputModePopup])
-        outputRow.orientation = .horizontal
-        outputRow.spacing = 6
-        stack.addArrangedSubview(outputRow)
-
-        revealCheckbox.state = .on
-        stack.addArrangedSubview(revealCheckbox)
+        if !videos.isEmpty {
+            // The video grid embeds the Filename + Reveal controls so they
+            // align with the other options.
+            stack.addArrangedSubview(gifSection())
+        } else {
+            // Image-only drops keep a standalone Filename + Reveal row.
+            let outputRow = NSStackView(views: [makeLabel("Filename"), outputModePopup, revealCheckbox])
+            outputRow.orientation = .horizontal
+            outputRow.spacing = 12
+            outputRow.setCustomSpacing(24, after: outputModePopup)
+            stack.addArrangedSubview(outputRow)
+        }
 
         convertButton.target = self
         convertButton.action = #selector(convertPressed)
         convertButton.keyEquivalent = "\r"
+        // A wider, slightly taller call-to-action (wider than it is tall).
+        convertButton.controlSize = .large
+        convertButton.widthAnchor.constraint(equalToConstant: 200).isActive = true
         spinner.style = .spinning
         spinner.controlSize = .small
         spinner.isDisplayedWhenStopped = false
@@ -147,8 +159,7 @@ final class OptionsWindowController: NSWindowController {
 
         stack.widthAnchor.constraint(greaterThanOrEqualToConstant: 440).isActive = true
         window?.contentView = stack
-        stack.layoutSubtreeIfNeeded()
-        window?.setContentSize(stack.fittingSize)
+        refreshWindowSize()
     }
 
     private func fileSummaryLabel() -> NSTextField {
@@ -298,28 +309,12 @@ final class OptionsWindowController: NSWindowController {
         gifCompressionPopup.target = self
         gifCompressionPopup.action = #selector(gifSettingChanged)
         gifWidthField.delegate = self
-        gifTargetField.delegate = self
-
-        for field in [gifWidthField, gifTargetField] {
-            field.widthAnchor.constraint(equalToConstant: 56).isActive = true
-        }
-        gifTargetField.placeholderString = "—"
+        gifWidthField.widthAnchor.constraint(equalToConstant: 56).isActive = true
 
         gifOriginalLabel.textColor = .secondaryLabelColor
         gifOriginalLabel.font = .systemFont(ofSize: 12)
         gifEstimateLabel.textColor = .secondaryLabelColor
         gifEstimateLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
-
-        let row = NSStackView(views: [
-            makeLabel("Format"), gifFormatPopup,
-            makeLabel("Width"), gifWidthField,
-            makeLabel("FPS"), gifFpsPopup,
-            gifColorsLabel, gifColorsPopup,
-            makeLabel("Compression"), gifCompressionPopup,
-            makeLabel("Max MB"), gifTargetField,
-        ])
-        row.orientation = .horizontal
-        row.spacing = 6
 
         gifSpeedSlider.target = self
         gifSpeedSlider.action = #selector(gifSpeedChanged)
@@ -330,11 +325,39 @@ final class OptionsWindowController: NSWindowController {
         gifSpeedValueLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         gifSpeedValueLabel.textColor = .secondaryLabelColor
         gifSpeedValueLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
-        let speedRow = NSStackView(views: [makeLabel("Speed"), gifSpeedSlider, gifSpeedValueLabel])
-        speedRow.orientation = .horizontal
-        speedRow.spacing = 8
 
-        var rowViews: [NSView] = [gifOriginalLabel, row, speedRow, gifEstimateLabel]
+        // A grid so labels and controls line up in columns. Labels are
+        //   left-aligned; every control shares a left margin down its column.
+        // Filename and Reveal join the grid so they align with the options —
+        // their wide controls span the trailing columns so they don't stretch
+        // the narrow first control column.
+        let revealSpacer = NSView()
+        let controlsGrid = NSGridView(views: [
+            [makeLabel("Format"), gifFormatPopup,
+             makeLabel("Speed"), gifSpeedSlider, gifSpeedValueLabel],
+            [makeLabel("Width"), gifWidthField,
+             makeLabel("FPS"), gifFpsPopup],
+            [gifColorsLabel, gifColorsPopup,
+             makeLabel("Compression"), gifCompressionPopup],
+            [makeLabel("Filename"), outputModePopup],
+            [revealSpacer, revealCheckbox],
+        ])
+        controlsGrid.rowSpacing = 10
+        controlsGrid.columnSpacing = 8
+        for i in 0..<controlsGrid.numberOfColumns {
+            controlsGrid.column(at: i).xPlacement = .leading
+        }
+        controlsGrid.column(at: 2).leadingPadding = 24   // gap between the two groups
+        for i in 0..<controlsGrid.numberOfRows {
+            controlsGrid.row(at: i).yPlacement = .center
+        }
+        controlsGrid.mergeCells(inHorizontalRange: NSRange(location: 1, length: 4),
+                                verticalRange: NSRange(location: 3, length: 1))
+        controlsGrid.mergeCells(inHorizontalRange: NSRange(location: 1, length: 4),
+                                verticalRange: NSRange(location: 4, length: 1))
+
+        // "Original … → Estimated …" summary as a single boxed bar with an arrow.
+        var rowViews: [NSView] = [makeVideoInfoBar(), controlsGrid]
         if videos.count == 1 {
             let trim = VideoTrimView()
             trim.load(url: videos[0])
@@ -350,10 +373,39 @@ final class OptionsWindowController: NSWindowController {
         let rows = NSStackView(views: rowViews)
         rows.orientation = .vertical
         rows.alignment = .leading
-        rows.spacing = 8
+        rows.spacing = 10
 
         loadVideoInfo()
         return section("Video → GIF / WebP", content: rows)
+    }
+
+    /// Boxed "Original … → Estimated …" bar. Reuses the two labels the async
+    /// probe and the live estimate update in place, joined by an arrow so the
+    /// before/after size reads as one glance.
+    private func makeVideoInfoBar() -> NSView {
+        let arrow = NSTextField(labelWithString: "→")
+        arrow.font = .systemFont(ofSize: 13, weight: .semibold)
+        arrow.textColor = .tertiaryLabelColor
+
+        // Content left-packed (original → estimate); the box spans the full
+        // content width so it lines up with the preview and slider.
+        let inner = NSStackView(views: [gifOriginalLabel, arrow, gifEstimateLabel])
+        inner.orientation = .horizontal
+        inner.spacing = 12
+        inner.alignment = .centerY
+        inner.translatesAutoresizingMaskIntoConstraints = false
+
+        let box = InfoBarBox()
+        box.translatesAutoresizingMaskIntoConstraints = false
+        box.addSubview(inner)
+        NSLayoutConstraint.activate([
+            box.widthAnchor.constraint(equalToConstant: Self.videoContentWidth),
+            inner.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 12),
+            inner.trailingAnchor.constraint(lessThanOrEqualTo: box.trailingAnchor, constant: -12),
+            inner.topAnchor.constraint(equalTo: box.topAnchor, constant: 7),
+            inner.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -7),
+        ])
+        return box
     }
 
     /// WebP has no palette, so the Colors control only applies to GIF.
@@ -408,13 +460,12 @@ final class OptionsWindowController: NSWindowController {
     }
 
     /// Crop drawn or cleared on the preview. A crop exports at native
-    /// resolution, so Width and Max MB (which resize) are disabled while one
-    /// is set, and re-enabled on Clear.
+    /// resolution, so Width (which resizes) is disabled while one is set,
+    /// and re-enabled on Clear.
     private func cropChanged(_ rect: NormalizedRect?) {
         cropNormalized = rect
         let hasCrop = currentCrop() != nil
         gifWidthField.isEnabled = !hasCrop
-        gifTargetField.isEnabled = !hasCrop
         updateGifEstimate()
     }
 
@@ -433,11 +484,8 @@ final class OptionsWindowController: NSWindowController {
         let bytes = GifProcessor.estimatedBytes(settings: settings,
                                                 source: info.pixelSize,
                                                 duration: info.duration)
-        var text = "Estimated \(settings.format.displayName): ~\(GifProcessor.format(bytes: bytes))"
-        if let target = settings.targetBytes, bytes > target {
-            text += "  (over max — width will shrink to fit)"
-        }
-        gifEstimateLabel.stringValue = text
+        gifEstimateLabel.stringValue =
+            "Estimated \(settings.format.displayName): ~\(GifProcessor.format(bytes: bytes))"
     }
 
     @objc private func gifSettingChanged() {
@@ -488,7 +536,16 @@ final class OptionsWindowController: NSWindowController {
     private func refreshWindowSize() {
         guard let stack = window?.contentView as? NSStackView else { return }
         stack.layoutSubtreeIfNeeded()
-        window?.setContentSize(stack.fittingSize)
+        var size = stack.fittingSize
+        if !videos.isEmpty {
+            // NSStackView's fittingSize omits the trailing inset when the
+            // widest arranged subview is fixed-width (the video media), so size
+            // the window explicitly to give the preview / slider / info bar the
+            // same right padding as the left.
+            size.width = max(size.width, Self.videoContentWidth
+                + stack.edgeInsets.left + stack.edgeInsets.right)
+        }
+        window?.setContentSize(size)
     }
 
     // MARK: - Conversion
@@ -505,7 +562,6 @@ final class OptionsWindowController: NSWindowController {
     }
 
     private func currentGifSettings() -> GifSettings {
-        let mb = Double(gifTargetField.stringValue)
         let fpsIndex = gifFpsPopup.indexOfSelectedItem
         let fps = Self.gifFpsOptions.indices.contains(fpsIndex)
             ? Self.gifFpsOptions[fpsIndex] : Self.gifFpsRecommended
@@ -516,7 +572,7 @@ final class OptionsWindowController: NSWindowController {
             width: max(Int(gifWidthField.stringValue) ?? 640, 40),
             fps: fps,
             colors: Int(gifColorsPopup.titleOfSelectedItem ?? "128") ?? 128,
-            targetBytes: mb.map { Int($0 * 1_000_000) },
+            targetBytes: nil,
             lossy: lossy,
             format: currentVideoFormat()
         )
@@ -528,11 +584,9 @@ final class OptionsWindowController: NSWindowController {
         }
         let speedPercent = Geometry.speedPercent(sliderValue: gifSpeedSlider.doubleValue)
         settings.speed = Geometry.speedFactor(percent: Double(speedPercent))
-        // A crop exports at native size, so it overrides width and the Max-MB
-        // target (both resize the output).
+        // A crop exports at native size, so it overrides the output width.
         if let crop = currentCrop() {
             settings.crop = crop
-            settings.targetBytes = nil
         }
         return settings
     }
@@ -620,10 +674,6 @@ final class OptionsWindowController: NSWindowController {
                         self?.setStatusAsync("\(job.source.lastPathComponent): \(note)")
                     }
                     outputs.append(result.output)
-                    if let target = gifSettings.targetBytes, result.bytes > target {
-                        failures.append("\(result.output.lastPathComponent) is "
-                            + "\(GifProcessor.format(bytes: result.bytes)) — could not reach target")
-                    }
                 } catch {
                     failures.append("\(job.source.lastPathComponent): \(error.localizedDescription)")
                 }
@@ -669,6 +719,31 @@ final class OptionsWindowController: NSWindowController {
     }
 }
 
+/// A rounded, single-pixel-bordered container. Redraws its border through
+/// `updateLayer` so the color re-resolves when the system appearance flips
+/// between light and dark.
+private final class InfoBarBox: NSView {
+    override var wantsUpdateLayer: Bool { true }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override func updateLayer() {
+        layer?.cornerRadius = 8
+        layer?.borderWidth = 1
+        layer?.borderColor = NSColor.separatorColor.cgColor
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+}
+
 extension OptionsWindowController: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         trimView?.teardown()
@@ -688,7 +763,7 @@ extension OptionsWindowController: NSTextFieldDelegate {
             updatePercentResult()
             return
         }
-        if field === gifWidthField || field === gifTargetField {
+        if field === gifWidthField {
             updateGifEstimate()
             return
         }

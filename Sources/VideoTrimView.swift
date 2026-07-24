@@ -9,9 +9,9 @@ import AVKit
 final class VideoTrimView: NSView {
     /// AVPlayerView has no intrinsic content size, so the preview needs
     /// explicit dimensions or the window's fittingSize collapses it.
-    private static let previewWidth: CGFloat = 320
+    private static let previewWidth: CGFloat = 560
     private static let minPreviewHeight: CGFloat = 80
-    private static let maxPreviewHeight: CGFloat = 240
+    private static let maxPreviewHeight: CGFloat = 320
     /// Smallest allowed exported range, in seconds.
     private static let minRange = 0.1
     private static let timescale: CMTimeScale = 600
@@ -180,7 +180,7 @@ final class VideoTrimView: NSView {
         rangeSlider.onChanged = { [weak self] handle in
             self?.rangeChanged(draggedHandle: handle)
         }
-        rangeSlider.widthAnchor.constraint(equalToConstant: 216).isActive = true
+        rangeSlider.widthAnchor.constraint(equalToConstant: 456).isActive = true
 
         for label in [startValueLabel, endValueLabel] {
             label.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
